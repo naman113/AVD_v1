@@ -1,0 +1,8 @@
+#!/usr/bin/env zsh
+# Uses unified_ingestor/unified_config.yml (renamed from config.yml)
+source "/Users/nemasis/Library/CloudStorage/OneDrive-Personal/Desktop/Techcore code files//.venv/bin/activate" && cd "/Users/nemasis/Library/CloudStorage/OneDrive-Personal/Desktop/Techcore code files/unified_ingestor" && python -m unified_ingestor.main
+
+
+
+
+source "/Users/nemasis/Library/CloudStorage/OneDrive-Personal/Desktop/Techcore code files/Gree Whatsapp Notification/greeTiles_v3_7july24/.venv/bin/activate" && cd "/Users/nemasis/Library/CloudStorage/OneDrive-Personal/Desktop/Techcore code files/Gree Whatsapp Notification/greeTiles_v3_7july24" && python unified_ingestor/tools/gree1_simulator.py

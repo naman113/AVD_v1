@@ -1,0 +1,237 @@
+mqtt_servers:
+  server1:
+    broker: s3550ec0.ala.us-east-1.emqxsl.com
+    port: 8883
+    username: Gree1
+    password: Gree1
+    ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
+    client_id_prefix: UnifiedIngestor
+    keepalive: 60
+  server2:
+    broker: pb192311.ala.asia-southeast1.emqxsl.com
+    port: 8883
+    username: Transaction
+    password: Transaction
+    ca_cert: /Users/nemasis/Downloads/emqxsl-ca.crt
+    client_id_prefix: TransactionL1
+    keepalive: 60
+
+database:
+  uri: postgresql://admin:password@db.telemetrywatch.com:5432/unified_ingestion
+
+patterns:
+  - name: flat_series
+    match:
+      keys:
+        - DeviceID
+        - Date
+        - Time
+        - P0
+    table: '{topic}_flat'
+    columns: auto
+  - name: array_enveloped
+    match:
+      schema:
+        root: object
+        fields:
+          d: object
+          ts: string
+    table: '{topic}_array_enveloped'
+    columns: auto
+
+routes:
+  - topic: Weighing
+    mqtt_server: server1
+    auto_discover: false
+    device_ids:
+      - pattern: '3'
+        pattern_name: auto
+        table_override: weighing_7
+      - pattern: '1'
+        pattern_name: auto
+        table_override: weighing_7
+      - pattern: '2'
+        pattern_name: auto
+        table_override: weighing_7
+  - topic: Gree1
+    mqtt_server: server1
+    auto_discover: true
+    device_ids:
+      - pattern: '1'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '2'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '3'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '4'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '5'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '6'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '7'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '8'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '9'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '10'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '11'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '12'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '13'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '14'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '15'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '16'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '17'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '18'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '19'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '20'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '21'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '22'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '23'
+        pattern_name: auto
+        table_override: gree1_9
+      - pattern: '55'
+        pattern_name: auto
+        table_override: gree1_17
+      - pattern: '91'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '92'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '93'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '95'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '96'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '97'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '98'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '99'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '100'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '101'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '102'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '103'
+        pattern_name: auto
+        table_override: gree1_4
+      - pattern: '*'
+        pattern_name: auto
+        table_override: null
+  - topic: Energy1
+    mqtt_server: server1
+    auto_discover: true
+    device_ids:
+      - pattern: '*'
+        pattern_name: auto
+        table_override: null
+      - pattern: '1'
+        pattern_name: auto
+        table_override: energy1_5
+      - pattern: '3'
+        pattern_name: auto
+        table_override: energy1_5
+  - topic: TU1
+    mqtt_server: server1
+    username: TU1
+    password: TU1
+    auto_discover: true
+    device_ids:
+      - pattern: '*'
+        pattern_name: array_enveloped
+        table_override: null
+  - topic: TU2
+    mqtt_server: server1
+    username: TU2
+    password: TU2
+    auto_discover: true
+    device_ids:
+      - pattern: '*'
+        pattern_name: array_enveloped
+        table_override: null
+  - topic: Transaction
+    mqtt_server: server2
+    username: Transaction
+    password: Transaction
+    auto_discover: true
+    device_ids:
+      - pattern: '*'
+        pattern_name: array_enveloped
+        table_override: null
+  - topic: TR1
+    mqtt_server: server2
+    username: TR1
+    password: TR1
+    auto_discover: true
+    device_ids:
+      - pattern: '*'
+        pattern_name: array_enveloped
+        table_override: null
+  - topic: TR2
+    mqtt_server: server2
+    username: TR2
+    password: TR2
+    auto_discover: true
+    device_ids:
+      - pattern: '*'
+        pattern_name: array_enveloped
+        table_override: null
+  - topic: TR3
+    mqtt_server: server2
+    username: TR3
+    password: TR3
+    auto_discover: true
+    device_ids:
+      - pattern: '*'
+        pattern_name: array_enveloped
+        table_override: null
