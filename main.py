@@ -7,6 +7,7 @@ from unified_ingestor.core.db import DB
 from unified_ingestor.core.mqtt_hub import MQTTHub
 from unified_ingestor.core.router import Router
 from unified_ingestor.core.config_store import ConfigStore
+from unified_ingestor.core.device_mapper import DeviceMapper
 from collections import defaultdict
 
 # When a new DeviceID is seen, we could persist to config; this version logs to stdout for clarity.
@@ -93,7 +94,11 @@ def main():
     cfg_loader = ConfigLoader('unified_ingestor/unified_config.yml', reload_seconds=15)
     cfg = cfg_loader.get()
     db = DB(cfg['database']['uri'])
-    router = Router(db, cfg.get('patterns', []))
+    
+    # Initialize device mapper
+    device_mapper = DeviceMapper(cfg['database']['uri'])
+    
+    router = Router(db, cfg.get('patterns', []), device_mapper)
     # No mqtt_defaults - each route must specify mqtt_server
     hub = MQTTHub({})
     counters = defaultdict(lambda: defaultdict(int))
@@ -102,7 +107,10 @@ def main():
 
     def on_change(new_cfg):
         logging.info('[CFG] Reload detected; rebuilding subscriptions')
-        build_subs(hub, router, new_cfg, counters)
+        # Update router with new device mapper if database URI changed
+        new_device_mapper = DeviceMapper(new_cfg['database']['uri'])
+        new_router = Router(db, new_cfg.get('patterns', []), new_device_mapper)
+        build_subs(hub, new_router, new_cfg, counters)
     cfg_loader.on_change(on_change)
 
     try:

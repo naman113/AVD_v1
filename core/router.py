@@ -4,11 +4,13 @@ import re
 import logging
 from .db import DB
 from .patterns import PatternMatcher
+from .device_mapper import DeviceMapper
 
 class Router:
-    def __init__(self, db: DB, patterns: list[Dict[str, Any]]):
+    def __init__(self, db: DB, patterns: list[Dict[str, Any]], device_mapper: Optional[DeviceMapper] = None):
         self.db = db
         self.matcher = PatternMatcher(patterns)
+        self.device_mapper = device_mapper
         # in-memory table cache
         self._tables = {}
         # name -> pattern map for quick lookup
@@ -86,6 +88,15 @@ class Router:
             row = PatternMatcher.to_row_auto(topic, payload)
             self.db.insert(self.db.meta.tables[table_name], row)
             
+            # Register device in mapper if available
+            if self.device_mapper and isinstance(payload, dict) and payload.get('DeviceID'):
+                self.device_mapper.register_device(
+                    topic=topic,
+                    device_id=str(payload['DeviceID']),
+                    table_name=table_name,
+                    pattern_name='auto'
+                )
+            
             # Log successful ingestion
             device_id = payload.get('DeviceID', 'unknown') if isinstance(payload, dict) else 'unknown'
             logging.info(f"[ROUTER] Inserted row: topic={topic} device={device_id} table={table_name} pattern=auto columns={len(auto_columns)}")
@@ -104,6 +115,15 @@ class Router:
             row = PatternMatcher.to_row_auto(topic, payload)
             self.db.insert(self.db.meta.tables[resolved], row)
             
+            # Register device in mapper if available
+            if self.device_mapper and isinstance(payload, dict) and payload.get('DeviceID'):
+                self.device_mapper.register_device(
+                    topic=topic,
+                    device_id=str(payload['DeviceID']),
+                    table_name=resolved,
+                    pattern_name=pattern_name or 'auto'
+                )
+            
             # Log successful ingestion
             device_id = payload.get('DeviceID', 'unknown') if isinstance(payload, dict) else 'unknown'
             logging.info(f"[ROUTER] Inserted row: topic={topic} device={device_id} table={resolved} pattern={pattern_name or 'auto'} columns={len(columns)}")
@@ -118,4 +138,14 @@ class Router:
             self._ensure(resolved, columns)
             row = PatternMatcher.to_row_auto(topic, payload)
             self.db.insert(self.db.meta.tables[resolved], row)
+            
+            # Register device in mapper if available
+            if self.device_mapper and isinstance(payload, dict) and payload.get('DeviceID'):
+                self.device_mapper.register_device(
+                    topic=topic,
+                    device_id=str(payload['DeviceID']),
+                    table_name=resolved,
+                    pattern_name=pattern_name or 'explicit'
+                )
+            
             return {'table': resolved, 'pattern': pattern_name or 'explicit', 'columns': columns}
