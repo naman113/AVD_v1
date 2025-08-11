@@ -5,12 +5,14 @@ import logging
 from .db import DB
 from .patterns import PatternMatcher
 from .device_mapper import DeviceMapper
+from .table_manager import TableManager
 
 class Router:
     def __init__(self, db: DB, patterns: list[Dict[str, Any]], device_mapper: Optional[DeviceMapper] = None):
         self.db = db
         self.matcher = PatternMatcher(patterns)
         self.device_mapper = device_mapper
+        self.table_manager = TableManager(db.engine)
         # in-memory table cache
         self._tables = {}
         # name -> pattern map for quick lookup
@@ -116,9 +118,21 @@ class Router:
         # AUTO mode (no pattern)
         if not pattern:
             data_cols_count = len([k for k in auto_columns.keys() if k != 'topic'])
-            preferred = self._format_table((rule.get('table_override') if rule else None), topic) \
-                or f"{safe}_{data_cols_count}"
-            table_name = self.db.resolve_compatible_table(preferred, auto_columns)
+            
+            # Use table manager to determine table name
+            table_config = {
+                'table_override': rule.get('table_override') if rule else None,
+                'auto_create': True,
+                'version_on_conflict': True
+            }
+            
+            table_name = self.table_manager.get_or_create_table_name(
+                table_config=table_config,
+                topic=topic,
+                device_pattern=rule.get('pattern', '*') if rule else '*',
+                message_structure=payload
+            )
+            
             self._ensure(table_name, auto_columns)
             self.db.ensure_columns(table_name, auto_columns)
             row = PatternMatcher.to_row_auto(topic, payload)
@@ -144,9 +158,21 @@ class Router:
         if pattern.get('columns') == 'auto':
             columns = auto_columns
             data_cols_count = len([k for k in columns.keys() if k != 'topic'])
-            preferred = self._format_table((rule.get('table_override') if rule else None), topic) \
-                or f"{safe}_{data_cols_count}"
-            resolved = self.db.resolve_compatible_table(preferred, columns)
+            
+            # Use table manager to determine table name
+            table_config = {
+                'table_override': rule.get('table_override') if rule else None,
+                'auto_create': True,
+                'version_on_conflict': True
+            }
+            
+            resolved = self.table_manager.get_or_create_table_name(
+                table_config=table_config,
+                topic=topic,
+                device_pattern=rule.get('pattern', '*') if rule else '*',
+                message_structure=payload
+            )
+            
             self._ensure(resolved, columns)
             self.db.ensure_columns(resolved, columns)
             row = PatternMatcher.to_row_auto(topic, payload)
@@ -170,9 +196,21 @@ class Router:
         else:
             columns = pattern.get('columns', {})
             data_cols_count = len([k for k in columns.keys() if k != 'topic']) if isinstance(columns, dict) else 0
-            preferred = self._format_table((rule.get('table_override') if rule else None), topic) \
-                or f"{safe}_{data_cols_count}"
-            resolved = self.db.resolve_compatible_table(preferred, columns)
+            
+            # Use table manager for explicit patterns too
+            table_config = {
+                'table_override': rule.get('table_override') if rule else None,
+                'auto_create': True,
+                'version_on_conflict': True
+            }
+            
+            resolved = self.table_manager.get_or_create_table_name(
+                table_config=table_config,
+                topic=topic,
+                device_pattern=rule.get('pattern', '*') if rule else '*',
+                message_structure=payload
+            )
+            
             self._ensure(resolved, columns)
             row = PatternMatcher.to_row_auto(topic, payload)
             self.db.insert(self.db.meta.tables[resolved], row)
