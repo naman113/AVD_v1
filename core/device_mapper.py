@@ -6,7 +6,7 @@ are stored in which database tables, with optional device naming.
 """
 import logging
 from typing import Dict, Any, Optional, List, Tuple
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, DateTime, UniqueConstraint
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, DateTime, UniqueConstraint, select, and_, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql import func
 from sqlalchemy import inspect
@@ -265,22 +265,33 @@ class DeviceMapper:
                 with self.engine.begin() as conn:
                     # Total devices
                     total_devices = conn.execute(
-                        f"SELECT COUNT(*) FROM {self.mapper_table.name}"
+                        func.count().select().select_from(self.mapper_table)
                     ).scalar()
                     
                     # Devices per topic
                     topic_counts = conn.execute(
-                        f"SELECT topic, COUNT(*) as count FROM {self.mapper_table.name} GROUP BY topic ORDER BY count DESC"
+                        select(
+                            self.mapper_table.c.topic,
+                            func.count().label('count')
+                        ).group_by(self.mapper_table.c.topic).order_by(text('count DESC'))
                     ).fetchall()
                     
                     # Devices per table
                     table_counts = conn.execute(
-                        f"SELECT table_name, COUNT(*) as count FROM {self.mapper_table.name} GROUP BY table_name ORDER BY count DESC"
+                        select(
+                            self.mapper_table.c.table_name,
+                            func.count().label('count')
+                        ).group_by(self.mapper_table.c.table_name).order_by(text('count DESC'))
                     ).fetchall()
                     
                     # Named vs unnamed devices
                     named_count = conn.execute(
-                        f"SELECT COUNT(*) FROM {self.mapper_table.name} WHERE device_name IS NOT NULL AND device_name != ''"
+                        select(func.count()).select_from(self.mapper_table).where(
+                            and_(
+                                self.mapper_table.c.device_name.is_not(None),
+                                self.mapper_table.c.device_name != ''
+                            )
+                        )
                     ).scalar()
                     
                     return {

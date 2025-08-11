@@ -16,6 +16,42 @@ class Router:
         # name -> pattern map for quick lookup
         self._pattern_by_name = {p.get('name'): p for p in patterns if p.get('name')}
 
+    def _extract_device_id(self, payload: Any, row_data: Dict[str, Any] = None) -> Optional[str]:
+        """Extract device ID from payload or row data, handling different message structures."""
+        # Method 1: Direct DeviceID in payload (most common)
+        if isinstance(payload, dict) and 'DeviceID' in payload:
+            return str(payload['DeviceID'])
+        
+        # Method 2: DeviceID in nested 'd' structure
+        if isinstance(payload, dict) and 'd' in payload and isinstance(payload['d'], dict):
+            if 'DeviceID' in payload['d']:
+                device_val = payload['d']['DeviceID']
+                # Handle list values (take first element)
+                if isinstance(device_val, list) and device_val:
+                    return str(device_val[0])
+                return str(device_val)
+        
+        # Method 3: Look in the row data that will be inserted (after auto-derivation)
+        if row_data and 'DeviceID' in row_data:
+            return str(row_data['DeviceID'])
+        
+        # Method 4: Try case-insensitive search in payload
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                if key.lower() in ['deviceid', 'device_id', 'device']:
+                    return str(value)
+        
+        # Method 5: Look in nested 'd' structure with case-insensitive search
+        if isinstance(payload, dict) and 'd' in payload and isinstance(payload['d'], dict):
+            for key, value in payload['d'].items():
+                if key.lower() in ['deviceid', 'device_id', 'device']:
+                    # Handle list values (take first element)
+                    if isinstance(value, list) and value:
+                        return str(value[0])
+                    return str(value)
+        
+        return None
+
     def _format_table(self, table_tpl: Optional[str], topic: str) -> Optional[str]:
         if not table_tpl:
             return None
@@ -56,7 +92,7 @@ class Router:
 
     def route(self, topic: str, payload: Any, rule: Optional[Dict[str, Any]] = None):
         # Log incoming message to router
-        device_id = payload.get('DeviceID', 'unknown') if isinstance(payload, dict) else 'unknown'
+        device_id = self._extract_device_id(payload) or 'unknown'
         logging.info(f"[ROUTER] Processing message: topic={topic} device={device_id}")
         
         # Match pattern
@@ -89,17 +125,18 @@ class Router:
             self.db.insert(self.db.meta.tables[table_name], row)
             
             # Register device in mapper if available
-            if self.device_mapper and isinstance(payload, dict) and payload.get('DeviceID'):
+            device_id = self._extract_device_id(payload, row)
+            if self.device_mapper and device_id:
                 self.device_mapper.register_device(
                     topic=topic,
-                    device_id=str(payload['DeviceID']),
+                    device_id=device_id,
                     table_name=table_name,
                     pattern_name='auto'
                 )
             
             # Log successful ingestion
-            device_id = payload.get('DeviceID', 'unknown') if isinstance(payload, dict) else 'unknown'
-            logging.info(f"[ROUTER] Inserted row: topic={topic} device={device_id} table={table_name} pattern=auto columns={len(auto_columns)}")
+            log_device_id = device_id or 'unknown'
+            logging.info(f"[ROUTER] Inserted row: topic={topic} device={log_device_id} table={table_name} pattern=auto columns={len(auto_columns)}")
             
             return {'table': table_name, 'pattern': 'auto', 'columns': auto_columns}
 
@@ -116,17 +153,18 @@ class Router:
             self.db.insert(self.db.meta.tables[resolved], row)
             
             # Register device in mapper if available
-            if self.device_mapper and isinstance(payload, dict) and payload.get('DeviceID'):
+            device_id = self._extract_device_id(payload, row)
+            if self.device_mapper and device_id:
                 self.device_mapper.register_device(
                     topic=topic,
-                    device_id=str(payload['DeviceID']),
+                    device_id=device_id,
                     table_name=resolved,
                     pattern_name=pattern_name or 'auto'
                 )
             
             # Log successful ingestion
-            device_id = payload.get('DeviceID', 'unknown') if isinstance(payload, dict) else 'unknown'
-            logging.info(f"[ROUTER] Inserted row: topic={topic} device={device_id} table={resolved} pattern={pattern_name or 'auto'} columns={len(columns)}")
+            log_device_id = device_id or 'unknown'
+            logging.info(f"[ROUTER] Inserted row: topic={topic} device={log_device_id} table={resolved} pattern={pattern_name or 'auto'} columns={len(columns)}")
             
             return {'table': resolved, 'pattern': pattern_name or 'auto', 'columns': columns}
         else:
@@ -140,10 +178,11 @@ class Router:
             self.db.insert(self.db.meta.tables[resolved], row)
             
             # Register device in mapper if available
-            if self.device_mapper and isinstance(payload, dict) and payload.get('DeviceID'):
+            device_id = self._extract_device_id(payload, row)
+            if self.device_mapper and device_id:
                 self.device_mapper.register_device(
                     topic=topic,
-                    device_id=str(payload['DeviceID']),
+                    device_id=device_id,
                     table_name=resolved,
                     pattern_name=pattern_name or 'explicit'
                 )

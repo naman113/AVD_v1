@@ -235,3 +235,12 @@ routes:
       - pattern: '*'
         pattern_name: array_enveloped
         table_override: null
+  - topic: TR4
+    mqtt_server: server2
+    username: TR4
+    password: TR4
+    auto_discover: true
+    device_ids:
+      - pattern: '*'
+        pattern_name: array_enveloped
+        table_override: null

@@ -2,12 +2,12 @@ import time
 import logging
 import json
 from typing import Dict, Any
-from unified_ingestor.core.config_loader import ConfigLoader
-from unified_ingestor.core.db import DB
-from unified_ingestor.core.mqtt_hub import MQTTHub
-from unified_ingestor.core.router import Router
-from unified_ingestor.core.config_store import ConfigStore
-from unified_ingestor.core.device_mapper import DeviceMapper
+from core.config_loader import ConfigLoader
+from core.db import DB
+from core.mqtt_hub import MQTTHub
+from core.router import Router
+from core.config_store import ConfigStore
+from core.device_mapper import DeviceMapper
 from collections import defaultdict
 
 # When a new DeviceID is seen, we could persist to config; this version logs to stdout for clarity.
@@ -91,7 +91,7 @@ def build_subs(hub: MQTTHub, router: Router, cfg: Dict[str, Any], counters):
 
 def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-    cfg_loader = ConfigLoader('unified_ingestor/unified_config.yml', reload_seconds=15)
+    cfg_loader = ConfigLoader('unified_config.yml', reload_seconds=15)
     cfg = cfg_loader.get()
     db = DB(cfg['database']['uri'])
     
