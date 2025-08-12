@@ -1,0 +1,1425 @@
+Fault-Tolerant Hierarchical Data Difference Calculator
+Overview
+This document provides a comprehensive specification for building a Fault-Tolerant Hierarchical Data Difference Calculator that processes MQTT data through multiple time interval levels with automatic fallback mechanisms. The system calculates parameter differences across configurable intervals (minute, hour, day, week, month) while ensuring 100% data continuity even during partial system failures.
+
+Table of Contents
+System Architecture
+Core Design Principles
+Configuration Schema
+Component Specifications
+Data Flow and Processing Logic
+Fallback and Recovery Mechanisms
+Database Schema Design
+Implementation Guidelines
+Error Handling and Monitoring
+Testing Strategy
+Deployment and Operations
+
+
+System Architecture
+High-Level Architecture
+┌─────────────────┐    ┌──────────────────┐    ┌───────────────────┐
+│   Raw MQTT      │    │  Hierarchical    │    │   Output Tables   │
+│   Data Tables   │───▶│  Processor       │───▶│   (Per Level)     │
+│                 │    │                  │    │                   │
+│ • gree1_4       │    │ • Fallback       │    │ • minute_analysis │
+│ • energy_meters │    │   Engine         │    │ • hourly_analysis │
+│ • sensor_data   │    │ • Interval       │    │ • daily_analysis  │
+└─────────────────┘    │   Calculator     │    │ • weekly_analysis │
+                       │ • Table Manager  │    │ • monthly_analysis│
+                       └──────────────────┘    └───────────────────┘
+
+Hierarchical Data Flow
+Raw Data (30-second intervals)
+    ↓ [processes 2 records → 1 minute]
+Minute Analysis Tables
+    ↓ [processes 60 minutes → 1 hour]
+Hour Analysis Tables  
+    ↓ [processes 24 hours → 1 day starting at 8 AM IST]
+Day Analysis Tables
+    ↓ [processes 7 days → 1 week starting Monday 8 AM IST]
+Week Analysis Tables
+    ↓ [processes ~4.3 weeks → 1 month starting 1st 8 AM IST]
+Month Analysis Tables
+
+Fallback Chain Architecture
+Month Calculator
+    ↓ (preferred: week data)
+    ↓ (fallback: day → hour → minute → raw)
+    
+Week Calculator  
+    ↓ (preferred: day data)
+    ↓ (fallback: hour → minute → raw)
+    
+Day Calculator
+    ↓ (preferred: hour data) 
+    ↓ (fallback: minute → raw)
+    
+Hour Calculator
+    ↓ (preferred: minute data)
+    ↓ (fallback: raw)
+    
+Minute Calculator
+    ↓ (only source: raw data)
+
+
+Core Design Principles
+1. Configuration-Driven Processing
+Single YAML configuration controls all behavior
+No hardcoded logic - everything configurable
+Hot-reload capability for configuration changes
+Environment-specific configs support
+2. Fault-Tolerant Hierarchical Processing
+Automatic fallback to lower-level data sources
+Continuous operation even with partial system failures
+Data integrity preservation across all levels
+Self-healing recovery when services restore
+3. Scalable Multi-Tenant Architecture
+Device-agnostic processing - works with any device type
+Parameter-agnostic calculations - handles any numeric parameter
+Table-agnostic storage - auto-creates output tables
+Frequency-agnostic intervals - supports any time interval
+4. Time Zone and Calendar Awareness
+IST timezone fixed for all calculations
+Configurable day start times (e.g., 8 AM daily)
+Calendar-aligned intervals (week starts Monday, month starts 1st)
+Precise interval boundaries with timezone handling\
+
+Configuration Schema
+Complete Configuration Example
+# difference_calculator_config.yml
+component_info:
+  name: "Fault-Tolerant Hierarchical Data Difference Calculator"
+  version: "1.0.0"
+  description: "Calculates parameter differences across time intervals with fallback support"
+
+global_settings:
+  # Processing frequency
+  calculation_frequency: "1min"        # How often to check for new intervals
+  incomplete_interval_delay: "2min"    # Wait time after interval ends before processing
+  
+  # Time configuration
+  timezone: "Asia/Kolkata"             # Fixed IST timezone
+  day_start_time: "08:00:00"           # Day starts at 8 AM IST
+  week_start_day: "monday"             # Week starts Monday 8 AM IST  
+  month_start_day: 1                   # Month starts 1st 8 AM IST
+  
+  # Database configuration
+  database:
+    host: "localhost"
+    port: 5432
+    database: "pipeline_db"
+    username: "pipeline_user"
+    password: "pipeline_password"
+    pool_size: 10
+    max_overflow: 20
+    
+  # Logging configuration
+  logging:
+    level: "INFO"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file: "difference_calculator.log"
+    max_file_size: "100MB"
+    backup_count: 5
+
+# Define the data hierarchy levels
+data_hierarchy:
+  levels:
+    - name: "raw"
+      interval_duration: "30s"        # Original MQTT data interval
+      description: "Raw MQTT sensor data"
+    - name: "minute"  
+      interval_duration: "1min"
+      description: "Minute-level aggregated data"
+    - name: "hour"
+      interval_duration: "1hour"
+      description: "Hour-level aggregated data"
+    - name: "day"
+      interval_duration: "1day"
+      description: "Daily aggregated data (8 AM to 8 AM)"
+    - name: "week"
+      interval_duration: "1week"
+      description: "Weekly aggregated data (Monday 8 AM to Monday 8 AM)"
+    - name: "month"
+      interval_duration: "1month"
+      description: "Monthly aggregated data (1st 8 AM to 1st 8 AM)"
+
+# Calculation rules for different devices and parameters
+calculation_rules:
+  # =============================================================================
+  # TEMPERATURE ANALYSIS - DEVICE 103
+  # =============================================================================
+  
+  # Level 1: Raw → Minute
+  - rule_id: "temp_minute_gree1_103"
+    description: "Temperature minute-level difference calculation for device 103"
+    enabled: true
+    
+    input:
+      preferred_table: "gree1_4"                    # Raw MQTT data table
+      fallback_tables: []                           # No fallback for base level
+      device_id: "103"                              # Specific device
+      parameter: "temperature"                      # Parameter to analyze
+      fallback_parameter: null                      # Not applicable for base level
+    
+    processing:
+      interval: "minute"                            # Calculate every minute
+      source_level: "raw"                           # Source is raw data
+      target_level: "minute"                        # Target is minute level
+      fallback_source_levels: []                    # No fallback levels
+      
+    backfill:
+      initial_intervals: 60                         # Backfill last 60 minutes on start
+      on_service_restart: true                      # Backfill missed intervals on restart
+      max_backfill_intervals: 1440                  # Max 24 hours of backfill
+      
+    calculations:
+      - type: "interval_difference"
+        description: "Difference between interval boundary values"
+        output_column: "temp_minute_diff"
+        formula: "current_boundary_value - previous_boundary_value"
+    
+    output:
+      table_config:
+        name: "temp_minute_analysis_gree1_103"
+        auto_create: true
+        version_on_conflict: true
+        primary_key: ["device_id", "interval_start_time"]
+        indexes: ["device_id", "interval_start_time", "calculated_at"]
+
+  # Level 2: Minute → Hour  
+  - rule_id: "temp_hourly_gree1_103"
+    description: "Temperature hourly difference calculation for device 103"
+    enabled: true
+    
+    input:
+      preferred_table: "temp_minute_analysis_gree1_103"    # Preferred: minute data
+      fallback_tables: ["gree1_4"]                        # Fallback: raw data
+      device_id: "103"
+      parameter: "current_boundary_value"                  # For minute source
+      fallback_parameter: "temperature"                    # For raw source
+    
+    processing:
+      interval: "hour"                                     # Calculate every hour
+      source_level: "minute"                               # Preferred source level
+      target_level: "hour"                                 # Target level
+      fallback_source_levels: ["raw"]                      # Fallback levels
+      
+    dependencies:
+      wait_for_rules: ["temp_minute_gree1_103"]            # Wait for minute calculation
+      max_wait_time: "5min"                                # Max wait before fallback
+      
+    backfill:
+      initial_intervals: 24                                # Last 24 hours
+      on_service_restart: true
+      max_backfill_intervals: 168                          # Max 7 days
+      
+    calculations:
+      - type: "interval_difference"
+        output_column: "temp_hourly_diff"
+    
+    output:
+      table_config:
+        name: "temp_hourly_analysis_gree1_103"
+        auto_create: true
+        version_on_conflict: true
+
+  # Level 3: Hour → Day
+  - rule_id: "temp_daily_gree1_103"
+    description: "Temperature daily difference calculation for device 103"
+    enabled: true
+    
+    input:
+      preferred_table: "temp_hourly_analysis_gree1_103"
+      fallback_tables: [
+        "temp_minute_analysis_gree1_103",
+        "gree1_4"
+      ]
+      device_id: "103"
+      parameter: "current_boundary_value"
+      fallback_parameter: "temperature"
+    
+    processing:
+      interval: "day"                                      # 8 AM to 8 AM IST
+      source_level: "hour"
+      target_level: "day"
+      fallback_source_levels: ["minute", "raw"]
+      
+    dependencies:
+      wait_for_rules: ["temp_hourly_gree1_103"]
+      max_wait_time: "10min"
+      
+    backfill:
+      initial_intervals: 7                                 # Last 7 days
+      on_service_restart: true
+      max_backfill_intervals: 30                           # Max 30 days
+      
+    calculations:
+      - type: "interval_difference"
+        output_column: "temp_daily_diff"
+    
+    output:
+      table_config:
+        name: "temp_daily_analysis_gree1_103"
+        auto_create: true
+        version_on_conflict: true
+
+  # Level 4: Day → Week
+  - rule_id: "temp_weekly_gree1_103"
+    description: "Temperature weekly difference calculation for device 103"
+    enabled: true
+    
+    input:
+      preferred_table: "temp_daily_analysis_gree1_103"
+      fallback_tables: [
+        "temp_hourly_analysis_gree1_103",
+        "temp_minute_analysis_gree1_103",
+        "gree1_4"
+      ]
+      device_id: "103"
+      parameter: "current_boundary_value"
+      fallback_parameter: "temperature"
+    
+    processing:
+      interval: "week"                                     # Monday 8 AM to Monday 8 AM IST
+      source_level: "day"
+      target_level: "week"
+      fallback_source_levels: ["hour", "minute", "raw"]
+      
+    dependencies:
+      wait_for_rules: ["temp_daily_gree1_103"]
+      max_wait_time: "15min"
+      
+    backfill:
+      initial_intervals: 4                                 # Last 4 weeks
+      on_service_restart: true
+      max_backfill_intervals: 12                           # Max 12 weeks
+      
+    calculations:
+      - type: "interval_difference"
+        output_column: "temp_weekly_diff"
+    
+    output:
+      table_config:
+        name: "temp_weekly_analysis_gree1_103"
+        auto_create: true
+        version_on_conflict: true
+
+  # Level 5: Week → Month
+  - rule_id: "temp_monthly_gree1_103"
+    description: "Temperature monthly difference calculation for device 103"
+    enabled: true
+    
+    input:
+      preferred_table: "temp_weekly_analysis_gree1_103"
+      fallback_tables: [
+        "temp_daily_analysis_gree1_103",
+        "temp_hourly_analysis_gree1_103", 
+        "temp_minute_analysis_gree1_103",
+        "gree1_4"
+      ]
+      device_id: "103"
+      parameter: "current_boundary_value"
+      fallback_parameter: "temperature"
+    
+    processing:
+      interval: "month"                                    # 1st 8 AM to 1st 8 AM IST
+      source_level: "week"
+      target_level: "month"
+      fallback_source_levels: ["day", "hour", "minute", "raw"]
+      
+    dependencies:
+      wait_for_rules: ["temp_weekly_gree1_103"]
+      max_wait_time: "20min"
+      
+    backfill:
+      initial_intervals: 12                                # Last 12 months
+      on_service_restart: true
+      max_backfill_intervals: 24                           # Max 24 months
+      
+    calculations:
+      - type: "interval_difference"
+        output_column: "temp_monthly_diff"
+    
+    output:
+      table_config:
+        name: "temp_monthly_analysis_gree1_103"
+        auto_create: true
+        version_on_conflict: true
+
+  # =============================================================================
+  # HUMIDITY ANALYSIS - DEVICE 103
+  # =============================================================================
+  
+  - rule_id: "humidity_daily_gree1_103"
+    description: "Humidity daily difference calculation for device 103"
+    enabled: true
+    
+    input:
+      preferred_table: "gree1_4"                          # Direct from raw data
+      fallback_tables: []
+      device_id: "103"
+      parameter: "humidity"
+      fallback_parameter: null
+    
+    processing:
+      interval: "day"
+      source_level: "raw"
+      target_level: "day"
+      fallback_source_levels: []
+      
+    backfill:
+      initial_intervals: 30                                # Last 30 days
+      on_service_restart: true
+      max_backfill_intervals: 90                           # Max 90 days
+      
+    calculations:
+      - type: "interval_difference"
+        output_column: "humidity_daily_diff"
+    
+    output:
+      table_config:
+        name: "humidity_daily_analysis_gree1_103"
+        auto_create: true
+        version_on_conflict: true
+
+  # =============================================================================
+  # ENERGY CONSUMPTION ANALYSIS - MULTIPLE METERS
+  # =============================================================================
+  
+  - rule_id: "energy_hourly_all_meters"
+    description: "Energy consumption hourly calculation for all meters"
+    enabled: true
+    
+    input:
+      preferred_table: "energy_meters"
+      fallback_tables: []
+      device_id: "*"                                       # All meters
+      parameter: "total_kwh"
+      fallback_parameter: null
+    
+    processing:
+      interval: "hour"
+      source_level: "raw"
+      target_level: "hour"
+      fallback_source_levels: []
+      
+    backfill:
+      initial_intervals: 24                                # Last 24 hours
+      on_service_restart: true
+      max_backfill_intervals: 168                          # Max 7 days
+      
+    calculations:
+      - type: "interval_difference"
+        output_column: "kwh_consumed"
+        description: "Energy consumed in the hour interval"
+    
+    output:
+      table_config:
+        name: "energy_hourly_consumption_all"
+        auto_create: true
+        version_on_conflict: true
+
+# Processing schedules and priorities
+processing_schedule:
+  # High priority - base level calculations
+  high_priority:
+    rules: ["temp_minute_gree1_103"]
+    max_parallel: 1
+    retry_attempts: 3
+    retry_delay: "30s"
+    
+  # Medium priority - intermediate level calculations  
+  medium_priority:
+    rules: ["temp_hourly_gree1_103", "energy_hourly_all_meters"]
+    max_parallel: 2
+    retry_attempts: 2
+    retry_delay: "1min"
+    
+  # Low priority - high level calculations
+  low_priority:
+    rules: [
+      "temp_daily_gree1_103", 
+      "temp_weekly_gree1_103", 
+      "temp_monthly_gree1_103",
+      "humidity_daily_gree1_103"
+    ]
+    max_parallel: 4
+    retry_attempts: 1
+    retry_delay: "2min"
+
+# Monitoring and alerting configuration
+monitoring:
+  health_check:
+    enabled: true
+    endpoint: "/health"
+    port: 8080
+    
+  metrics:
+    enabled: true
+    endpoint: "/metrics"
+    port: 8080
+    export_interval: "30s"
+    
+  alerts:
+    enabled: true
+    
+    # Alert when fallback sources are used
+    fallback_usage:
+      threshold: 5                                         # Alert after 5 fallback uses
+      time_window: "1hour"
+      severity: "warning"
+      
+    # Alert when processing fails
+    processing_failures:
+      threshold: 3                                         # Alert after 3 consecutive failures
+      time_window: "15min"
+      severity: "critical"
+      
+    # Alert when backfill queue grows large
+    backfill_queue_size:
+      threshold: 100                                       # Alert when 100+ intervals queued
+      severity: "warning"
+      
+  notification:
+    slack:
+      enabled: true
+      webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+      channel: "#data-pipeline-alerts"
+      
+    email:
+      enabled: true
+      smtp_server: "smtp.company.com"
+      from_address: "pipeline@company.com"
+      to_addresses: ["admin@company.com", "devops@company.com"]
+
+Component Specifications
+1. Core Components Structure
+difference_calculator/
+├── core/
+│   ├── __init__.py
+│   ├── config_manager.py              # Configuration loading and validation
+│   ├── hierarchical_processor.py      # Main processing engine
+│   ├── fallback_engine.py            # Fallback and recovery logic
+│   ├── interval_calculator.py        # Time interval calculations
+│   ├── table_manager.py              # Database table management
+│   ├── dependency_manager.py         # Rule dependency handling
+│   └── data_fetcher.py               # Data retrieval with fallback
+├── connectors/
+│   ├── __init__.py
+│   ├── database_connector.py         # PostgreSQL connection management
+│   └── monitoring_connector.py       # Metrics and health checks
+├── schedulers/
+│   ├── __init__.py
+│   ├── interval_scheduler.py         # Interval-based task scheduling
+│   ├── priority_scheduler.py         # Priority-based rule scheduling
+│   └── backfill_scheduler.py         # Backfill operation scheduling
+├── utils/
+│   ├── __init__.py
+│   ├── timezone_utils.py             # IST timezone handling
+│   ├── validation_utils.py           # Configuration validation
+│   └── logging_utils.py              # Structured logging
+├── tools/
+│   ├── __init__.py
+│   ├── config_validator.py           # Configuration validation tool
+│   ├── backfill_tool.py             # Manual backfill operations
+│   ├── migration_tool.py             # Database schema migrations
+│   └── monitoring_dashboard.py       # Simple monitoring dashboard
+├── tests/
+│   ├── __init__.py
+│   ├── test_config_manager.py
+│   ├── test_hierarchical_processor.py
+│   ├── test_fallback_engine.py
+│   ├── test_interval_calculator.py
+│   ├── integration_tests/
+│   │   ├── test_full_pipeline.py
+│   │   ├── test_fallback_scenarios.py
+│   │   └── test_recovery_scenarios.py
+│   └── fixtures/
+│       ├── sample_config.yml
+│       ├── test_data.sql
+│       └── mock_mqtt_data.json
+├── difference_calculator_config.yml   # Main configuration file
+├── main.py                           # Application entry point
+├── requirements.txt                  # Python dependencies
+├── Dockerfile                        # Container configuration
+├── docker-compose.yml               # Multi-service deployment
+└── README.md                         # Component documentation
+
+2. Component Specifications
+config_manager.py
+"""
+Configuration Manager Component
+
+Responsibilities:
+- Load and parse YAML configuration
+- Validate configuration schema
+- Handle configuration hot-reload
+- Provide configuration access to other components
+- Support environment variable substitution
+
+Key Classes:
+- ConfigManager: Main configuration management
+- ConfigValidator: Schema validation
+- ConfigSchema: Configuration data structures
+
+Key Methods:
+- load_config(): Load configuration from file
+- validate_config(): Validate configuration structure
+- reload_config(): Hot-reload configuration
+- get_rule_config(): Get specific rule configuration
+- get_global_settings(): Get global settings
+"""
+
+hierarchical_processor.py"""
+Hierarchical Processor Component
+
+Responsibilities:
+- Orchestrate calculation rule processing
+- Manage processing dependencies
+- Handle rule scheduling and execution
+- Coordinate with fallback engine
+- Manage processing state and recovery
+
+Key Classes:
+- HierarchicalProcessor: Main processing engine
+- RuleProcessor: Individual rule processing
+- ProcessingState: State management
+- ProcessingMetrics: Performance metrics
+
+Key Methods:
+- initialize(): Initialize processor
+- start_processing(): Start processing loop
+- process_rule(): Process individual rule
+- handle_dependencies(): Manage rule dependencies
+- recover_from_failure(): Handle failure recovery
+""""""
+Fallback Engine Component
+
+Responsibilities:
+- Implement fallback data source logic
+- Handle data source failures gracefully
+- Optimize fallback decision making
+- Cache fallback strategies
+- Monitor fallback usage patterns
+
+Key Classes:
+- FallbackEngine: Main fallback logic
+- DataSourceManager: Data source management
+- FallbackStrategy: Fallback decision logic
+- FallbackCache: Caching fallback decisions
+
+Key Methods:
+- get_interval_data(): Get data with fallback
+- evaluate_data_sources(): Check source availability
+- execute_fallback_strategy(): Execute fallback logic
+- cache_fallback_decision(): Cache decisions
+- monitor_fallback_usage(): Track usage patterns
+""""""
+Interval Calculator Component
+
+Responsibilities:
+- Calculate time intervals based on configuration
+- Handle IST timezone conversions
+- Manage calendar-aligned intervals
+- Calculate backfill intervals
+- Validate interval completeness
+
+Key Classes:
+- IntervalCalculator: Main interval calculation
+- TimezoneManager: IST timezone handling
+- CalendarManager: Calendar calculations
+- IntervalValidator: Interval validation
+
+Key Methods:
+- calculate_next_interval(): Get next interval to process
+- get_interval_boundaries(): Calculate interval start/end
+- is_interval_complete(): Check if interval is ready
+- calculate_backfill_intervals(): Calculate backfill range
+- align_to_calendar(): Align intervals to calendar
+""""""
+Table Manager Component
+
+Responsibilities:
+- Auto-create output tables with proper schema
+- Handle table versioning and conflicts
+- Manage table indexes and constraints
+- Optimize table performance
+- Handle table migrations
+
+Key Classes:
+- TableManager: Main table management
+- SchemaManager: Database schema handling
+- IndexManager: Index management
+- TableMetrics: Table performance metrics
+
+Key Methods:
+- ensure_table_exists(): Create table if needed
+- create_table_schema(): Generate table schema
+- handle_schema_conflicts(): Manage conflicts
+- optimize_table_performance(): Performance tuning
+- migrate_table_schema(): Handle migrations
+""""""
+Dependency Manager Component
+
+Responsibilities:
+- Manage inter-rule dependencies
+- Coordinate rule execution order
+- Handle dependency failures
+- Optimize dependency resolution
+- Monitor dependency health
+
+Key Classes:
+- DependencyManager: Main dependency logic
+- DependencyGraph: Rule dependency graph
+- DependencyResolver: Resolution logic
+- DependencyMonitor: Health monitoring
+
+Key Methods:
+- build_dependency_graph(): Create dependency graph
+- resolve_dependencies(): Determine execution order
+- wait_for_dependencies(): Wait for prerequisite rules
+- handle_dependency_failure(): Handle failures
+- monitor_dependency_health(): Health monitoring
+"""
+
+
+
+Data Flow and Processing Logic
+1. Processing Flow Diagram
+┌─────────────────┐
+│  Configuration  │
+│     Loaded      │
+└─────────┬───────┘
+          │
+          ▼
+┌─────────────────┐    ┌──────────────────┐
+│   Dependency    │───▶│   Rule Priority  │
+│   Resolution    │    │   Assignment     │
+└─────────┬───────┘    └─────────┬────────┘
+          │                      │
+          ▼                      ▼
+┌─────────────────┐    ┌──────────────────┐
+│   Interval      │    │    Backfill      │
+│  Calculation    │    │   Operations     │
+└─────────┬───────┘    └─────────┬────────┘
+          │                      │
+          ▼                      ▼
+┌─────────────────┐    ┌──────────────────┐
+│   Data Source   │    │   Fallback       │
+│   Evaluation    │───▶│   Engine         │
+└─────────┬───────┘    └─────────┬────────┘
+          │                      │
+          ▼                      ▼
+┌─────────────────┐    ┌──────────────────┐
+│   Boundary      │    │   Difference     │
+│   Value         │───▶│   Calculation    │
+│   Retrieval     │    │                  │
+└─────────┬───────┘    └─────────┬────────┘
+          │                      │
+          ▼                      ▼
+┌─────────────────┐    ┌──────────────────┐
+│   Output        │    │   State          │
+│   Table         │───▶│   Update         │
+│   Storage       │    │                  │
+└─────────────────┘    └──────────────────┘
+
+2. Detailed Processing Algorithm
+Main Processing Loop1. INITIALIZATION PHASE
+   - Load configuration
+   - Validate configuration schema
+   - Initialize database connections
+   - Build dependency graph
+   - Calculate initial backfill requirements
+
+2. BACKFILL PHASE (if required)
+   - Calculate missed intervals since last run
+   - Process backfill intervals in chronological order
+   - Update processing state for each completed interval
+   - Monitor backfill progress and performance
+
+3. REAL-TIME PROCESSING PHASE
+   - Enter continuous processing loop
+   - Check for configuration changes (hot-reload)
+   - Evaluate ready intervals for each rule
+   - Process rules according to priority and dependencies
+   - Handle failures with fallback mechanisms
+   - Update metrics and monitoring data
+
+4. SHUTDOWN PHASE
+   - Complete current interval processing
+   - Save processing state
+   - Close database connections
+   - Generate shutdown report
+
+Individual Rule Processing AlgorithmFOR EACH RULE:
+  1. INTERVAL READINESS CHECK
+     - Calculate next interval to process
+     - Check if interval is complete (past end time + delay)
+     - Verify dependencies are satisfied
+     
+  2. DATA SOURCE EVALUATION  
+     - Check preferred data source availability
+     - Evaluate data quality and completeness
+     - Decide on fallback strategy if needed
+     
+  3. BOUNDARY VALUE RETRIEVAL
+     - Get previous interval boundary value
+     - Get current interval boundary value
+     - Handle missing data with configured strategy
+     
+  4. DIFFERENCE CALCULATION
+     - Calculate interval difference (current - previous)
+     - Handle initial interval case (set to null)
+     - Apply any additional calculations
+     
+  5. OUTPUT STORAGE
+     - Ensure output table exists with correct schema
+     - Insert calculated results
+     - Update processing state
+     - Log processing metrics
+     
+  6. ERROR HANDLING
+     - Catch and log any processing errors
+     - Apply retry logic if configured
+     - Escalate to fallback sources if available
+     - Alert monitoring systems if critical
+
+
+3. Interval Calculation Logic
+Time Interval Boundaries
+Hour Intervals (Standard)
+# Hour intervals align to clock hours
+start_time = datetime(2025, 8, 11, 10, 0, 0, tzinfo=IST)  # 10:00:00 IST
+end_time = datetime(2025, 8, 11, 11, 0, 0, tzinfo=IST)    # 11:00:00 IST
+Day Intervals (8 AM Start)# Day intervals start at 8 AM IST
+start_time = datetime(2025, 8, 11, 8, 0, 0, tzinfo=IST)   # Aug 11 08:00:00 IST
+end_time = datetime(2025, 8, 12, 8, 0, 0, tzinfo=IST)     # Aug 12 08:00:00 IST
+Week Intervals (Monday 8 AM Start)# Week intervals start Monday 8 AM IST
+start_time = datetime(2025, 8, 11, 8, 0, 0, tzinfo=IST)   # Monday Aug 11 08:00:00 IST
+end_time = datetime(2025, 8, 18, 8, 0, 0, tzinfo=IST)     # Monday Aug 18 08:00:00 IST
+Month Intervals (1st 8 AM Start)
+# Month intervals start 1st 8 AM IST
+start_time = datetime(2025, 8, 1, 8, 0, 0, tzinfo=IST)    # Aug 1 08:00:00 IST
+end_time = datetime(2025, 9, 1, 8, 0, 0, tzinfo=IST)      # Sep 1 08:00:00 IST
+
+
+Boundary Value Retrieval Logic
+For Raw Data Sources
+-- Get previous boundary value (last record before interval start)
+SELECT {parameter} FROM {table}
+WHERE device_id = '{device_id}' 
+  AND timestamp < '{interval_start_time}'
+ORDER BY timestamp DESC 
+LIMIT 1;
+
+-- Get current boundary value (last record before interval end)  
+SELECT {parameter} FROM {table}
+WHERE device_id = '{device_id}'
+  AND timestamp < '{interval_end_time}'
+ORDER BY timestamp DESC
+LIMIT 1;
+
+For Aggregated Data Sources
+-- Get previous boundary value from aggregated table
+SELECT current_boundary_value FROM {aggregated_table}
+WHERE device_id = '{device_id}'
+  AND interval_end_time <= '{interval_start_time}'
+ORDER BY interval_end_time DESC
+LIMIT 1;
+
+-- Get current boundary value from aggregated table
+SELECT current_boundary_value FROM {aggregated_table}  
+WHERE device_id = '{device_id}'
+  AND interval_end_time <= '{interval_end_time}'
+ORDER BY interval_end_time DESC
+LIMIT 1;
+
+Fallback and Recovery Mechanisms
+1. Fallback Strategy Matrix
+Target Level	Preferred Source	1st Fallback	2nd Fallback	3rd Fallback	4th Fallback
+Minute	Raw Data	-	-	-	-
+Hour	Minute Data	Raw Data	-	-	-
+Day	Hour Data	Minute Data	Raw Data	-	-
+Week	Day Data	Hour Data	Minute Data	Raw Data	-
+Month	Week Data	Day Data	Hour Data	Minute Data	Raw Data
+
+2. Fallback Decision Logic
+def determine_fallback_strategy(rule_config, interval_start, interval_end):
+    """
+    Determine the best data source for the given interval
+    
+    Decision Factors:
+    1. Data source availability (table exists, connection healthy)
+    2. Data completeness (sufficient records in interval)
+    3. Data quality (no obvious anomalies)
+    4. Processing performance (query execution time)
+    5. Historical reliability (past success rate)
+    """
+    
+    preferred_source = rule_config['input']['preferred_table']
+    fallback_sources = rule_config['input']['fallback_tables']
+    
+    # Step 1: Evaluate preferred source
+    if evaluate_data_source(preferred_source, interval_start, interval_end):
+        return preferred_source, 'preferred'
+    
+    # Step 2: Evaluate fallback sources in order
+    for i, fallback_source in enumerate(fallback_sources):
+        if evaluate_data_source(fallback_source, interval_start, interval_end):
+            return fallback_source, f'fallback_{i+1}'
+    
+    # Step 3: No suitable source found
+    return None, 'failed'
+
+def evaluate_data_source(table_name, interval_start, interval_end):
+    """
+    Evaluate if a data source is suitable for processing
+    
+    Evaluation Criteria:
+    1. Table accessibility (exists and queryable)
+    2. Data availability (records exist in time range)
+    3. Data quality (values within expected ranges)
+    4. Processing feasibility (reasonable query performance)
+    """
+    
+    # Check table accessibility
+    if not table_exists(table_name):
+        return False
+    
+    # Check data availability
+    record_count = get_record_count(table_name, interval_start, interval_end)
+    if record_count == 0:
+        return False
+    
+    # Check data quality (basic validation)
+    if not validate_data_quality(table_name, interval_start, interval_end):
+        return False
+    
+    # Check processing feasibility
+    estimated_query_time = estimate_query_performance(table_name, record_count)
+    if estimated_query_time > MAX_QUERY_TIME:
+        return False
+    
+    return True
+
+3. Recovery Mechanisms
+Automatic Service Recoverydef recover_from_service_restart():
+    """
+    Recovery process when service restarts after downtime
+    """
+    
+    for rule_config in get_enabled_rules():
+        # Step 1: Determine last processed interval
+        last_processed = get_last_processed_interval(rule_config['rule_id'])
+        
+        # Step 2: Calculate missed intervals
+        current_time = datetime.now(IST)
+        missed_intervals = calculate_missed_intervals(
+            rule_config['interval'], 
+            last_processed, 
+            current_time
+        )
+        
+        # Step 3: Limit backfill to maximum configured
+        max_backfill = rule_config['backfill']['max_backfill_intervals']
+        if len(missed_intervals) > max_backfill:
+            missed_intervals = missed_intervals[-max_backfill:]
+            log_warning(f"Limiting backfill to {max_backfill} intervals for {rule_config['rule_id']}")
+        
+        # Step 4: Queue backfill operations
+        for interval_start, interval_end in missed_intervals:
+            queue_backfill_operation(rule_config, interval_start, interval_end)
+        
+        # Step 5: Resume real-time processing
+        schedule_real_time_processing(rule_config)
+
+def handle_dependency_failure(failed_rule_id, dependent_rules):
+    """
+    Handle cascading effects when a dependency fails
+    """
+    
+    for dependent_rule in dependent_rules:
+        # Step 1: Check if dependent rule can use fallback
+        fallback_available = check_fallback_availability(dependent_rule)
+        
+        if fallback_available:
+            # Step 2: Switch to fallback data source
+            switch_to_fallback_source(dependent_rule, failed_rule_id)
+            log_info(f"Switched {dependent_rule['rule_id']} to fallback due to {failed_rule_id} failure")
+        else:
+            # Step 3: Pause dependent rule until dependency recovers
+            pause_rule_processing(dependent_rule['rule_id'])
+            schedule_recovery_check(dependent_rule['rule_id'], failed_rule_id)
+            log_warning(f"Paused {dependent_rule['rule_id']} due to {failed_rule_id} failure")
+
+Data Source Recovery
+def monitor_and_recover_data_sources():
+    """
+    Continuously monitor data source health and recover when possible
+    """
+    
+    for rule_config in get_rules_using_fallback():
+        preferred_source = rule_config['input']['preferred_table']
+        
+        # Step 1: Check if preferred source has recovered
+        if evaluate_data_source(preferred_source, get_recent_interval()):
+            # Step 2: Switch back to preferred source
+            switch_to_preferred_source(rule_config)
+            log_info(f"Recovered {rule_config['rule_id']} to preferred source {preferred_source}")
+            
+            # Step 3: Backfill any missed data during fallback period
+            backfill_recovery_data(rule_config)
+
+Database Schema Design
+1. Output Table Schema Template
+-- Template for all analysis output tables
+CREATE TABLE {table_name} (
+    -- Primary key and identification
+    id SERIAL PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    parameter TEXT NOT NULL,
+    
+    -- Interval metadata
+    interval_type TEXT NOT NULL,                    -- 'minute', 'hour', 'day', 'week', 'month'
+    interval_start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    interval_end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    
+    -- Source data references (for traceability)
+    source_table_used TEXT,                        -- Which table was used as source
+    source_interval_start_id BIGINT,               -- First source record ID
+    source_interval_end_id BIGINT,                 -- Last source record ID
+    
+    -- Boundary values
+    previous_boundary_value DOUBLE PRECISION,      -- Value at previous interval end
+    current_boundary_value DOUBLE PRECISION,       -- Value at current interval end
+    
+    -- Calculated values
+    interval_difference DOUBLE PRECISION,          -- current - previous
+    
+    -- Metadata
+    is_initial BOOLEAN DEFAULT FALSE,              -- True for first interval
+    fallback_source_used BOOLEAN DEFAULT FALSE,    -- True if fallback was used
+    calculation_method TEXT,                       -- Method used for calculation
+    data_quality_score DECIMAL(3,2),              -- Data quality score (0.00-1.00)
+    
+    -- Timestamps
+    calculated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Constraints
+    CONSTRAINT {table_name}_unique_interval UNIQUE (device_id, parameter, interval_start_time),
+    CONSTRAINT {table_name}_valid_interval CHECK (interval_end_time > interval_start_time),
+    CONSTRAINT {table_name}_valid_quality CHECK (data_quality_score BETWEEN 0.00 AND 1.00)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_{table_name}_device_time ON {table_name} (device_id, interval_start_time);
+CREATE INDEX idx_{table_name}_parameter ON {table_name} (parameter);
+CREATE INDEX idx_{table_name}_calculated_at ON {table_name} (calculated_at);
+CREATE INDEX idx_{table_name}_interval_type ON {table_name} (interval_type);
+
+-- Trigger for updated_at
+CREATE TRIGGER {table_name}_updated_at
+    BEFORE UPDATE ON {table_name}
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+2. Specific Table Examples
+Minute Level Analysis Table
+CREATE TABLE temp_minute_analysis_gree1_103 (
+    id SERIAL PRIMARY KEY,
+    device_id TEXT NOT NULL DEFAULT '103',
+    parameter TEXT NOT NULL DEFAULT 'temperature',
+    
+    interval_type TEXT NOT NULL DEFAULT 'minute',
+    interval_start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    interval_end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    
+    source_table_used TEXT DEFAULT 'gree1_4',
+    source_interval_start_id BIGINT,
+    source_interval_end_id BIGINT,
+    
+    previous_boundary_value DOUBLE PRECISION,
+    current_boundary_value DOUBLE PRECISION,
+    
+    interval_difference DOUBLE PRECISION,
+    
+    is_initial BOOLEAN DEFAULT FALSE,
+    fallback_source_used BOOLEAN DEFAULT FALSE,
+    calculation_method TEXT DEFAULT 'boundary_difference',
+    data_quality_score DECIMAL(3,2) DEFAULT 1.00,
+    
+    calculated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    CONSTRAINT temp_minute_analysis_gree1_103_unique_interval 
+        UNIQUE (device_id, parameter, interval_start_time),
+    CONSTRAINT temp_minute_analysis_gree1_103_valid_interval 
+        CHECK (interval_end_time > interval_start_time)
+);
+
+Daily Level Analysis Table
+CREATE TABLE temp_daily_analysis_gree1_103 (
+    id SERIAL PRIMARY KEY,
+    device_id TEXT NOT NULL DEFAULT '103',
+    parameter TEXT NOT NULL DEFAULT 'temperature',
+    
+    interval_type TEXT NOT NULL DEFAULT 'day',
+    interval_start_time TIMESTAMP WITH TIME ZONE NOT NULL,  -- 8 AM IST
+    interval_end_time TIMESTAMP WITH TIME ZONE NOT NULL,    -- Next day 8 AM IST
+    
+    source_table_used TEXT DEFAULT 'temp_hourly_analysis_gree1_103',
+    source_interval_start_id BIGINT,
+    source_interval_end_id BIGINT,
+    
+    previous_boundary_value DOUBLE PRECISION,
+    current_boundary_value DOUBLE PRECISION,
+    
+    interval_difference DOUBLE PRECISION,
+    
+    is_initial BOOLEAN DEFAULT FALSE,
+    fallback_source_used BOOLEAN DEFAULT FALSE,
+    calculation_method TEXT DEFAULT 'boundary_difference',
+    data_quality_score DECIMAL(3,2) DEFAULT 1.00,
+    
+    calculated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    CONSTRAINT temp_daily_analysis_gree1_103_unique_interval 
+        UNIQUE (device_id, parameter, interval_start_time),
+    CONSTRAINT temp_daily_analysis_gree1_103_valid_interval 
+        CHECK (interval_end_time > interval_start_time)
+);
+
+
+3. Processing State Tables
+Rule Processing State Table
+CREATE TABLE rule_processing_state (
+    id SERIAL PRIMARY KEY,
+    rule_id TEXT NOT NULL UNIQUE,
+    
+    -- Processing status
+    is_enabled BOOLEAN DEFAULT TRUE,
+    current_status TEXT DEFAULT 'ready',              -- 'ready', 'processing', 'paused', 'failed'
+    
+    -- Last processed interval
+    last_processed_interval_start TIMESTAMP WITH TIME ZONE,
+    last_processed_interval_end TIMESTAMP WITH TIME ZONE,
+    
+    -- Backfill tracking
+    backfill_queue_size INTEGER DEFAULT 0,
+    backfill_in_progress BOOLEAN DEFAULT FALSE,
+    
+    -- Error tracking  
+    consecutive_failures INTEGER DEFAULT 0,
+    last_failure_time TIMESTAMP WITH TIME ZONE,
+    last_failure_reason TEXT,
+    
+    -- Performance metrics
+    total_intervals_processed BIGINT DEFAULT 0,
+    average_processing_time_ms INTEGER DEFAULT 0,
+    last_processing_time_ms INTEGER DEFAULT 0,
+    
+    -- Fallback usage
+    fallback_usage_count INTEGER DEFAULT 0,
+    currently_using_fallback BOOLEAN DEFAULT FALSE,
+    current_data_source TEXT,
+    
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    CONSTRAINT rule_processing_state_valid_status 
+        CHECK (current_status IN ('ready', 'processing', 'paused', 'failed'))
+);
+
+-- Index for performance
+CREATE INDEX idx_rule_processing_state_rule_id ON rule_processing_state (rule_id);
+CREATE INDEX idx_rule_processing_state_status ON rule_processing_state (current_status);
+
+Data Source Health TableCREATE TABLE data_source_health (
+    id SERIAL PRIMARY KEY,
+    table_name TEXT NOT NULL,
+    
+    -- Health status
+    is_healthy BOOLEAN DEFAULT TRUE,
+    last_health_check TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    consecutive_failures INTEGER DEFAULT 0,
+    
+    -- Performance metrics
+    average_query_time_ms INTEGER DEFAULT 0,
+    last_query_time_ms INTEGER DEFAULT 0,
+    record_count_estimate BIGINT DEFAULT 0,
+    
+    -- Data quality metrics
+    data_quality_score DECIMAL(3,2) DEFAULT 1.00,
+    null_value_percentage DECIMAL(5,2) DEFAULT 0.00,
+    anomaly_detection_score DECIMAL(3,2) DEFAULT 0.00,
+    
+    -- Usage tracking
+    total_queries_served BIGINT DEFAULT 0,
+    fallback_requests BIGINT DEFAULT 0,
+    
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    CONSTRAINT data_source_health_unique_table UNIQUE (table_name),
+    CONSTRAINT data_source_health_valid_quality 
+        CHECK (data_quality_score BETWEEN 0.00 AND 1.00)
+);
+
+
+# System requirements
+- Python 3.9+
+- PostgreSQL 13+
+- Redis 6+ (for caching and queuing)
+- Docker and Docker Compose (for development)
+
+# Python virtual environment
+python -m venv difference_calculator_venv
+source difference_calculator_venv/bin/activate  # Linux/Mac
+# or
+difference_calculator_venv\Scripts\activate     # Windows
+
+# Install dependencies
+pip install -r requirements.txt
+
+# requirements.txt
+
+# Core dependencies
+asyncio>=3.4.3
+asyncpg>=0.27.0
+pyyaml>=6.0
+pytz>=2023.3
+python-dateutil>=2.8.2
+
+# Data processing
+pandas>=2.0.3
+numpy>=1.24.3
+
+# Monitoring and logging
+structlog>=23.1.0
+prometheus-client>=0.17.1
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.1
+pytest-cov>=4.1.0
+factory-boy>=3.3.0
+
+# Development tools
+black>=23.7.0
+flake8>=6.0.0
+mypy>=1.5.1
+pre-commit>=3.3.3
+
+# Optional: API framework for monitoring endpoints
+fastapi>=0.101.1
+uvicorn>=0.23.2
+
+# Optional: Redis for caching
+redis>=4.6.0
+hiredis>=2.2.3
+
+#!/bin/bash
+# setup_project.sh
+
+# Create main project structure
+mkdir -p difference_calculator/{core,connectors,schedulers,utils,tools,tests}
+mkdir -p difference_calculator/tests/{integration_tests,fixtures}
+
+# Create __init__.py files
+find difference_calculator -type d -exec touch {}/__init__.py \;
+
+# Create main files
+touch difference_calculator/{main.py,requirements.txt,Dockerfile,docker-compose.yml}
+touch difference_calculator/difference_calculator_config.yml
+
+# Create core module files
+touch difference_calculator/core/{config_manager.py,hierarchical_processor.py}
+touch difference_calculator/core/{fallback_engine.py,interval_calculator.py}
+touch difference_calculator/core/{table_manager.py,dependency_manager.py,data_fetcher.py}
+
+# Create connector files
+touch difference_calculator/connectors/{database_connector.py,monitoring_connector.py}
+
+# Create scheduler files  
+touch difference_calculator/schedulers/{interval_scheduler.py,priority_scheduler.py,backfill_scheduler.py}
+
+# Create utility files
+touch difference_calculator/utils/{timezone_utils.py,validation_utils.py,logging_utils.py}
+
+# Create tool files
+touch difference_calculator/tools/{config_validator.py,backfill_tool.py}
+touch difference_calculator/tools/{migration_tool.py,monitoring_dashboard.py}
+
+# Create test files
+touch difference_calculator/tests/test_{config_manager,hierarchical_processor,fallback_engine,interval_calculator}.py
+touch difference_calculator/tests/integration_tests/test_{full_pipeline,fallback_scenarios,recovery_scenarios}.py
+touch difference_calculator/tests/fixtures/{sample_config.yml,test_data.sql,mock_mqtt_data.json}
+
+echo "Project structure created successfully!"
+
+
+3. Implementation Order
+Phase 1: Core Infrastructure 
+1. config_manager.py - Configuration loading and validation
+2. database_connector.py - PostgreSQL connection management  
+3. timezone_utils.py - IST timezone handling
+4. logging_utils.py - Structured logging setup
+5. validation_utils.py - Configuration validation
+6. Basic test framework setup
+Phase 2: Time and Interval Management 
+1. interval_calculator.py - Time interval calculations
+2. Calendar alignment logic (8 AM start times)
+3. Interval boundary calculations
+4. Backfill interval calculations
+5. Unit tests for interval logic
+Phase 3: Table and Data Management
+1. table_manager.py - Auto table creation
+2. data_fetcher.py - Data retrieval logic
+3. Database schema creation
+4. Index optimization
+5. Integration tests with database
+Phase 4: Processing Engine 
+1. hierarchical_processor.py - Main processing logic
+2. Rule processing implementation
+3. State management
+4. Error handling
+5. Performance optimization
+Phase 5: Fallback and Recovery 
+1. fallback_engine.py - Fallback logic
+2. dependency_manager.py - Dependency handling
+3. Recovery mechanisms
+4. Failure simulation tests
+5. End-to-end fallback testing
+Phase 6: Scheduling and Monitoring 1. interval_scheduler.py - Interval-based scheduling
+2. priority_scheduler.py - Priority-based execution
+3. backfill_scheduler.py - Backfill operations
+4. monitoring_connector.py - Health checks and metrics
+5. Performance monitoring
+Phase 7: Tools and Operations
+1. config_validator.py - Configuration validation tool
+2. backfill_tool.py - Manual backfill operations
+3. migration_tool.py - Database migrations
+4. monitoring_dashboard.py - Simple monitoring UI
+5. Deployment scripts and documentation
+
+
+Error Handling Standards
+import structlog
+from typing import Optional
+
+logger = structlog.get_logger(__name__)
+
+class ProcessingError(Exception):
+    """Base exception for processing errors"""
+    pass
+
+class DataSourceError(ProcessingError):
+    """Exception for data source failures"""
+    pass
+
+async def safe_process_rule(rule_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Safely process a rule with comprehensive error handling
+    """
+    try:
+        result = await process_rule(rule_config)
+        logger.info("Rule processed successfully", 
+                   rule_id=rule_config['rule_id'],
+                   result=result)
+        return result
+        
+    except DataSourceError as e:
+        logger.warning("Data source failure, attempting fallback",
+                      rule_id=rule_config['rule_id'],
+                      error=str(e))
+        return await process_rule_with_fallback(rule_config)
+        
+    except Exception as e:
+        logger.error("Unexpected error processing rule",
+                    rule_id=rule_config['rule_id'], 
+                    error=str(e),
+                    exc_info=True)
+        raise ProcessingError(f"Failed to process rule {rule_config['rule_id']}: {e}")
+
+Error Handling and Monitoring
+1. Error Classification
+Error Categories
+class ErrorCategories:
+    """Classification of errors by severity and handling strategy"""
+    
+    # Recoverable errors - retry with backoff
+    RECOVERABLE = [
+        'database_connection_timeout',
+        'temporary_table_lock',
+        'network_timeout',
+        'memory_pressure'
+    ]
+    
+    # Fallback errors - switch to fallback source
+    FALLBACK = [
+        'preferred_source_unavailable',
+        'data_quality_insufficient', 
+        'query_performance_degraded',
+        'source_table_corruption'
+    ]
+    
+    # Critical errors - require immediate attention
+    CRITICAL = [
+        'configuration_invalid',
+        'database_server_down',
+        'disk_space_exhausted',
+        'memory_exhausted'
+    ]
+    
+    # Data errors - log and continue with best effort
+    DATA = [
+        'missing_data_in_interval',
+        'invalid_parameter_values',
+        'timestamp_inconsistencies',
+        'duplicate_records'
+    ]
+Error Handling Strategyasync def handle_processing_error(error: Exception, 
+                                 rule_config: Dict[str, Any],
+                                 context: Dict[str, Any]) -> ErrorAction:
+    """
+    Determine appropriate action based on error type and context
+    """
+    
+    error_type = classify_error(error)
+    rule_id = rule_config['rule_id']
+    
+    if error_type in ErrorCategories.RECOVERABLE:
+        # Implement exponential backoff retry
+        retry_count = context.get('retry_count', 0)
+        max_retries = rule_config.get('max_retries', 3)
+        
+        if retry_count < max_retries:
+            wait_time = min(300, 2 ** retry_count)  # Max 5 minutes
+            await asyncio.sleep(wait_time)
+            return ErrorAction.RETRY
+        else:
+            return ErrorAction.SKIP_INTERVAL
+            
+    elif error_type in ErrorCategories.FALLBACK:
+        # Switch to fallback data source
+        return ErrorAction.USE_FALLBACK
+        
+    elif error_type in ErrorCategories.CRITICAL:
+        # Alert and pause processing
+        await send_critical_alert(error, rule_id, context)
+        return ErrorAction.PAUSE_RULE
+        
+    elif error_type in ErrorCategories.DATA:
+        # Log and continue with zero values
+        logger.warning("Data error, using zero values",
+                      rule_id=rule_id, error=str(error))
+        return ErrorAction.USE_ZERO_VALUES
+        
+    else:
+        # Unknown error - treat as critical
+        return ErrorAction.PAUSE_RULE
