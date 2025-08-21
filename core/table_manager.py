@@ -82,13 +82,27 @@ class TableManager:
         data_cols = self._get_data_columns(message_structure)
         data_col_count = len(data_cols)
         
-        # Check if we already have a similar table structure
+        # For parameter-based routing, use the parameter count in table name
+        # Check for specific parameter patterns (4, 5, 9 params)
+        param_patterns = {
+            4: f"{safe_topic}_4",
+            5: f"{safe_topic}_5", 
+            9: f"{safe_topic}_9"
+        }
+        
+        # If we have a standard parameter count, use the predefined table name
+        if data_col_count in param_patterns:
+            table_name = param_patterns[data_col_count]
+            logger.info(f"[TABLE_MANAGER] Using parameter-based table name: {table_name} for {data_col_count} parameters")
+            return table_name
+        
+        # Check if we already have a similar table structure for other counts
         existing_similar = self._find_similar_table(safe_topic, data_cols)
         if existing_similar:
             logger.info(f"[TABLE_MANAGER] Found similar existing table: {existing_similar}")
             return existing_similar
         
-        # Generate new table name
+        # Generate new table name for non-standard parameter counts
         if device_pattern != '*':
             return f"{safe_topic}_{device_pattern}_{data_col_count}"
         else:

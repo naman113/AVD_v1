@@ -97,16 +97,17 @@ class Router:
         device_id = self._extract_device_id(payload) or 'unknown'
         logging.info(f"[ROUTER] Processing message: topic={topic} device={device_id}")
         
-        # Match pattern
-        # Determine base match
+        # Match pattern first
         matched_name, matched_pattern = self.matcher.match(payload)
         pattern_name = matched_name
         pattern = matched_pattern
+        
         # Allow rule to override pattern selection, including forcing 'auto'
         if rule and rule.get('pattern_name'):
             override = rule['pattern_name']
             pattern_name = override
             if override == 'auto':
+                # If forced to auto, let pattern matching decide but use auto mode
                 pattern = None
             else:
                 pattern = self._pattern_by_name.get(override, matched_pattern)
@@ -115,8 +116,39 @@ class Router:
         auto_columns = PatternMatcher.derive_columns_auto(topic, payload)
         safe = self._safe_topic(topic)
 
-        # AUTO mode (no pattern)
-        if not pattern:
+        # If we have a matched pattern, use its table template
+        if pattern and pattern.get('table'):
+            table_template = pattern['table']
+            resolved_table = self._format_table(table_template, topic)
+            
+            if pattern.get('columns') == 'auto':
+                columns = auto_columns
+            else:
+                columns = pattern.get('columns', {})
+            
+            self._ensure(resolved_table, columns)
+            self.db.ensure_columns(resolved_table, columns)
+            row = PatternMatcher.to_row_auto(topic, payload)
+            self.db.insert(self.db.meta.tables[resolved_table], row)
+            
+            # Register device in mapper if available
+            device_id = self._extract_device_id(payload, row)
+            if self.device_mapper and device_id:
+                self.device_mapper.register_device(
+                    topic=topic,
+                    device_id=device_id,
+                    table_name=resolved_table,
+                    pattern_name=pattern_name or 'matched'
+                )
+            
+            # Log successful ingestion
+            log_device_id = device_id or 'unknown'
+            logging.info(f"[ROUTER] Inserted row: topic={topic} device={log_device_id} table={resolved_table} pattern={pattern_name} columns={len(columns)}")
+            
+            return {'table': resolved_table, 'pattern': pattern_name, 'columns': columns}
+
+        # AUTO mode (no pattern or forced auto)
+        else:
             data_cols_count = len([k for k in auto_columns.keys() if k != 'topic'])
             
             # Use table manager to determine table name
@@ -153,76 +185,3 @@ class Router:
             logging.info(f"[ROUTER] Inserted row: topic={topic} device={log_device_id} table={table_name} pattern=auto columns={len(auto_columns)}")
             
             return {'table': table_name, 'pattern': 'auto', 'columns': auto_columns}
-
-        # Known pattern
-        if pattern.get('columns') == 'auto':
-            columns = auto_columns
-            data_cols_count = len([k for k in columns.keys() if k != 'topic'])
-            
-            # Use table manager to determine table name
-            table_config = {
-                'table_override': rule.get('table_override') if rule else None,
-                'auto_create': True,
-                'version_on_conflict': True
-            }
-            
-            resolved = self.table_manager.get_or_create_table_name(
-                table_config=table_config,
-                topic=topic,
-                device_pattern=rule.get('pattern', '*') if rule else '*',
-                message_structure=payload
-            )
-            
-            self._ensure(resolved, columns)
-            self.db.ensure_columns(resolved, columns)
-            row = PatternMatcher.to_row_auto(topic, payload)
-            self.db.insert(self.db.meta.tables[resolved], row)
-            
-            # Register device in mapper if available
-            device_id = self._extract_device_id(payload, row)
-            if self.device_mapper and device_id:
-                self.device_mapper.register_device(
-                    topic=topic,
-                    device_id=device_id,
-                    table_name=resolved,
-                    pattern_name=pattern_name or 'auto'
-                )
-            
-            # Log successful ingestion
-            log_device_id = device_id or 'unknown'
-            logging.info(f"[ROUTER] Inserted row: topic={topic} device={log_device_id} table={resolved} pattern={pattern_name or 'auto'} columns={len(columns)}")
-            
-            return {'table': resolved, 'pattern': pattern_name or 'auto', 'columns': columns}
-        else:
-            columns = pattern.get('columns', {})
-            data_cols_count = len([k for k in columns.keys() if k != 'topic']) if isinstance(columns, dict) else 0
-            
-            # Use table manager for explicit patterns too
-            table_config = {
-                'table_override': rule.get('table_override') if rule else None,
-                'auto_create': True,
-                'version_on_conflict': True
-            }
-            
-            resolved = self.table_manager.get_or_create_table_name(
-                table_config=table_config,
-                topic=topic,
-                device_pattern=rule.get('pattern', '*') if rule else '*',
-                message_structure=payload
-            )
-            
-            self._ensure(resolved, columns)
-            row = PatternMatcher.to_row_auto(topic, payload)
-            self.db.insert(self.db.meta.tables[resolved], row)
-            
-            # Register device in mapper if available
-            device_id = self._extract_device_id(payload, row)
-            if self.device_mapper and device_id:
-                self.device_mapper.register_device(
-                    topic=topic,
-                    device_id=device_id,
-                    table_name=resolved,
-                    pattern_name=pattern_name or 'explicit'
-                )
-            
-            return {'table': resolved, 'pattern': pattern_name or 'explicit', 'columns': columns}
