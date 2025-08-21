@@ -6,6 +6,7 @@ from .db import DB
 from .patterns import PatternMatcher
 from .device_mapper import DeviceMapper
 from .table_manager import TableManager
+from .data_transformer import DataTransformer
 
 class Router:
     def __init__(self, db: DB, patterns: list[Dict[str, Any]], device_mapper: Optional[DeviceMapper] = None):
@@ -13,6 +14,7 @@ class Router:
         self.matcher = PatternMatcher(patterns)
         self.device_mapper = device_mapper
         self.table_manager = TableManager(db.engine)
+        self.data_transformer = DataTransformer()
         # in-memory table cache
         self._tables = {}
         # name -> pattern map for quick lookup
@@ -126,13 +128,25 @@ class Router:
             else:
                 columns = pattern.get('columns', {})
             
+            # Apply transformations if defined in the pattern
+            transformed_payload = payload
+            if pattern.get('transformations'):
+                transformed_payload = self.data_transformer.apply_transformations(
+                    data=payload,
+                    topic=topic,
+                    transformations=pattern['transformations']
+                )
+                # Recalculate columns after transformation
+                if pattern.get('columns') == 'auto':
+                    columns = PatternMatcher.derive_columns_auto(topic, transformed_payload)
+            
             self._ensure(resolved_table, columns)
             self.db.ensure_columns(resolved_table, columns)
-            row = PatternMatcher.to_row_auto(topic, payload)
+            row = PatternMatcher.to_row_auto(topic, transformed_payload)
             self.db.insert(self.db.meta.tables[resolved_table], row)
             
             # Register device in mapper if available
-            device_id = self._extract_device_id(payload, row)
+            device_id = self._extract_device_id(transformed_payload, row)
             if self.device_mapper and device_id:
                 self.device_mapper.register_device(
                     topic=topic,

@@ -32,6 +32,16 @@ patterns:
         - P1
     table: '{topic}_5'
     columns: auto
+    transformations:
+      - name: combine_decimal_parts
+        condition:
+          topic: Energy1
+        action:
+          type: combine_decimal
+          integer_field: P0
+          fractional_field: P1
+          target_field: P0
+          remove_fractional: true
   - name: flat_series_9_params
     match:
       keys:
