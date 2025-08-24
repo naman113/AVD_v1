@@ -73,12 +73,12 @@ routes:
     auto_discover: true
     device_ids:
       - pattern: '*'
-        pattern_name: auto
+        # Let pattern matching decide automatically
   - topic: Energy1
     mqtt_server: server1
     auto_discover: true
     device_ids:
       - pattern: '*'
-        pattern_name: auto
+        pattern_name: flat_series_5_params
 
   

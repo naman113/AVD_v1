@@ -132,15 +132,12 @@ class DataTransformer:
             return data
         
         try:
-            integer_part = int(data[integer_field])
-            fractional_part = int(data[fractional_field])
-            
-            # Determine the number of decimal places based on fractional part
-            fractional_str = str(fractional_part)
-            decimal_places = len(fractional_str)
+            # Handle both string and numeric inputs, including floats
+            integer_part = int(float(data[integer_field]))
+            fractional_part = float(data[fractional_field])
             
             # Combine into decimal value
-            combined_value = integer_part + (fractional_part / (10 ** decimal_places))
+            combined_value = integer_part + fractional_part
             
             # Update the data
             result_data = data.copy()
@@ -150,7 +147,7 @@ class DataTransformer:
             if remove_fractional and fractional_field in result_data:
                 del result_data[fractional_field]
             
-            logger.info(f"[TRANSFORMER] Combined decimal: {integer_part} + 0.{fractional_str} = {combined_value}")
+            logger.info(f"[TRANSFORMER] Combined decimal: {integer_part} + {fractional_part} = {combined_value}")
             return result_data
             
         except (ValueError, TypeError) as e:
