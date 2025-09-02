@@ -2,8 +2,8 @@ mqtt_servers:
   server1:
     broker: s3550ec0.ala.us-east-1.emqxsl.com
     port: 8883
-    username: Gree1
-    password: Gree1
+    username: Pengvin1
+    password: Pengvin1
     ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
     client_id_prefix: UnifiedIngestor
     keepalive: 60
@@ -68,17 +68,17 @@ patterns:
 
 routes:
 
-  - topic: Gree1
+  - topic: Pengvin1
     mqtt_server: server1
     auto_discover: true
     device_ids:
       - pattern: '*'
         # Let pattern matching decide automatically
-  - topic: Energy1
-    mqtt_server: server1
-    auto_discover: true
-    device_ids:
-      - pattern: '*'
-        pattern_name: flat_series_5_params
+  #- topic: Energy1
+    #mqtt_server: server1
+    #auto_discover: true
+    #device_ids:
+      - #pattern: '*'
+        #pattern_name: flat_series_5_params
 
   
