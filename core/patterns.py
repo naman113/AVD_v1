@@ -13,13 +13,33 @@ class PatternMatcher:
                 m = p.get('match', {})
                 req = set(m.get('keys', []))
                 if req and req.issubset(keys):
-                    cand = (len(req), p)
+                    # Score based on exactness of match - prefer exact matches
+                    exactness_score = 1000 if len(req) == len(keys) else len(req)
+                    cand = (exactness_score, p)
                     if best is None or cand[0] > best[0]:
                         best = cand
             if best is not None:
                 chosen = best[1]
                 return chosen['name'], chosen
-        # schema based (very light check)
+        
+        # Check nested 'd' structure for array enveloped pattern
+        if isinstance(payload, dict) and 'd' in payload and isinstance(payload['d'], dict):
+            d_keys = set(payload['d'].keys())
+            best: Tuple[int, Dict[str, Any]] | None = None
+            for p in self.patterns:
+                m = p.get('match', {})
+                req = set(m.get('keys', []))
+                if req and req.issubset(d_keys):
+                    # Score based on exactness of match for nested structure
+                    exactness_score = 1000 if len(req) == len(d_keys) else len(req)
+                    cand = (exactness_score, p)
+                    if best is None or cand[0] > best[0]:
+                        best = cand
+            if best is not None:
+                chosen = best[1]
+                return chosen['name'], chosen
+        
+        # schema based (very light check) - fallback for array enveloped
         for p in self.patterns:
             m = p.get('match', {})
             schema = m.get('schema')
