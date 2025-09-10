@@ -20,7 +20,7 @@ patterns:
         - Date
         - Time
         - P0
-    table: '{topic}_4'
+    table: '{topic}_4_difference'
     columns: auto
   - name: flat_series_5_params
     match:
@@ -30,7 +30,9 @@ patterns:
         - Time
         - P0
         - P1
-    table: '{topic}_5'
+        - P2
+        - P3
+    table: '{topic}_5_difference'
     columns: auto
     transformations:
       - name: combine_decimal_parts
@@ -54,7 +56,7 @@ patterns:
         - P3
         - P4
         - P5
-    table: '{topic}_9'
+    table: '{topic}_9_difference'
     columns: auto
   - name: array_enveloped
     match:
@@ -67,18 +69,17 @@ patterns:
     columns: auto
 
 routes:
-
   - topic: Pengvin1
     mqtt_server: server1
     auto_discover: true
     device_ids:
       - pattern: '*'
         # Let pattern matching decide automatically
-  #- topic: Energy1
-    #mqtt_server: server1
-    #auto_discover: true
-    #device_ids:
-      - #pattern: '*'
-        #pattern_name: flat_series_5_params
-
   
+  # Commented out Energy1 route for now
+  # - topic: Energy1
+  #   mqtt_server: server1
+  #   auto_discover: true
+  #   device_ids:
+  #     - pattern: '*'
+  #       pattern_name: flat_series_5_params

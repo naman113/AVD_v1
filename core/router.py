@@ -19,6 +19,8 @@ class Router:
         self._tables = {}
         # name -> pattern map for quick lookup
         self._pattern_by_name = {p.get('name'): p for p in patterns if p.get('name')}
+        # in-memory cache for last readings per device/topic for difference calculation
+        self._last_readings = {}  # key: f"{topic}:{device_id}" -> Dict[str, Any]
 
     def _extract_device_id(self, payload: Any, row_data: Dict[str, Any] = None) -> Optional[str]:
         """Extract device ID from payload or row data, handling different message structures."""
@@ -54,6 +56,102 @@ class Router:
                         return str(value[0])
                     return str(value)
         
+        return None
+
+    def _calculate_differences(self, topic: str, device_id: str, current_row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Calculate differences between current and last reading for the same device/topic.
+        Returns None if this is the first reading (to initialize cache).
+        Returns difference row if this is a subsequent reading."""
+        
+        cache_key = f"{topic}:{device_id}"
+        
+        # Debug: Log the current row structure and types
+        debug_info = {}
+        for key, value in current_row.items():
+            debug_info[key] = f"{type(value).__name__}:{value}"
+        logging.info(f"[ROUTER] DEBUG Row structure for {cache_key}: {debug_info}")
+        
+        # If this is the first reading for this device/topic, store it and return None
+        if cache_key not in self._last_readings:
+            # Store the current reading as the baseline (excluding metadata fields)
+            baseline = {}
+            for key, value in current_row.items():
+                if key not in ['topic', 'DeviceID', 'Date', 'Time', 'ts', 'ingested_at']:
+                    # Try to convert string numbers to numeric values
+                    numeric_value = self._try_convert_to_numeric(value)
+                    if numeric_value is not None:
+                        baseline[key] = numeric_value
+            
+            self._last_readings[cache_key] = {
+                'data': baseline,
+                'metadata': {
+                    'DeviceID': current_row.get('DeviceID'),
+                    'Date': current_row.get('Date'),
+                    'Time': current_row.get('Time'),
+                    'ts': current_row.get('ts')
+                }
+            }
+            
+            logging.info(f"[ROUTER] Initialized baseline for topic={topic} device={device_id} with {len(baseline)} numeric fields: {list(baseline.keys())}")
+            return None
+        
+        # Calculate differences for numeric fields
+        last_reading = self._last_readings[cache_key]
+        last_data = last_reading['data']
+        diff_row = {
+            'topic': topic,
+            'DeviceID': current_row.get('DeviceID'),
+            'Date': current_row.get('Date'),
+            'Time': current_row.get('Time'),
+            'ts': current_row.get('ts')
+        }
+        
+        # Calculate differences for each numeric field
+        differences_found = False
+        for key, current_value in current_row.items():
+            if key not in ['topic', 'DeviceID', 'Date', 'Time', 'ts', 'ingested_at']:
+                # Try to convert to numeric
+                numeric_current = self._try_convert_to_numeric(current_value)
+                if numeric_current is not None and key in last_data:
+                    difference = numeric_current - last_data[key]
+                    diff_row[key] = difference
+                    differences_found = True
+                    
+                    # Update cache with current value
+                    last_data[key] = numeric_current
+                elif numeric_current is not None:
+                    # New field that wasn't in the baseline
+                    diff_row[key] = numeric_current  # First occurrence, use raw value
+                    last_data[key] = numeric_current
+                    differences_found = True
+        
+        # Update metadata in cache
+        last_reading['metadata'] = {
+            'DeviceID': current_row.get('DeviceID'),
+            'Date': current_row.get('Date'),
+            'Time': current_row.get('Time'),
+            'ts': current_row.get('ts')
+        }
+        
+        if differences_found:
+            logging.info(f"[ROUTER] Calculated differences for topic={topic} device={device_id}: {[(k,v) for k,v in diff_row.items() if k not in ['topic', 'DeviceID', 'Date', 'Time', 'ts']]}")
+            return diff_row
+        else:
+            logging.warning(f"[ROUTER] No numeric fields found for difference calculation: topic={topic} device={device_id}")
+            return None
+
+    def _try_convert_to_numeric(self, value: Any) -> Optional[float]:
+        """Try to convert a value to numeric (float). Returns None if not possible."""
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                # Remove any whitespace and try to convert
+                cleaned = value.strip()
+                if cleaned:
+                    return float(cleaned)
+            except (ValueError, TypeError):
+                pass
         return None
 
     def _format_table(self, table_tpl: Optional[str], topic: str) -> Optional[str]:
@@ -143,23 +241,40 @@ class Router:
             self._ensure(resolved_table, columns)
             self.db.ensure_columns(resolved_table, columns)
             row = PatternMatcher.to_row_auto(topic, transformed_payload)
-            self.db.insert(self.db.meta.tables[resolved_table], row)
             
-            # Register device in mapper if available
+            # Extract device ID for difference calculation
             device_id = self._extract_device_id(transformed_payload, row)
-            if self.device_mapper and device_id:
-                self.device_mapper.register_device(
-                    topic=topic,
-                    device_id=device_id,
-                    table_name=resolved_table,
-                    pattern_name=pattern_name or 'matched'
-                )
-            
-            # Log successful ingestion
-            log_device_id = device_id or 'unknown'
-            logging.info(f"[ROUTER] Inserted row: topic={topic} device={log_device_id} table={resolved_table} pattern={pattern_name} columns={len(columns)}")
-            
-            return {'table': resolved_table, 'pattern': pattern_name, 'columns': columns}
+            if device_id:
+                # Calculate differences instead of inserting raw values
+                diff_row = self._calculate_differences(topic, device_id, row)
+                if diff_row is not None:
+                    # Create difference table name with "_diff" suffix
+                    diff_table = f"{resolved_table}_diff"
+                    self._ensure(diff_table, columns)
+                    self.db.ensure_columns(diff_table, columns)
+                    self.db.insert(self.db.meta.tables[diff_table], diff_row)
+                    
+                    # Register device in mapper if available
+                    if self.device_mapper:
+                        self.device_mapper.register_device(
+                            topic=topic,
+                            device_id=device_id,
+                            table_name=diff_table,
+                            pattern_name=pattern_name or 'matched'
+                        )
+                    
+                    # Log successful difference insertion
+                    logging.info(f"[ROUTER] Inserted difference row: topic={topic} device={device_id} table={diff_table} pattern={pattern_name} columns={len(columns)}")
+                    return {'table': diff_table, 'pattern': pattern_name, 'columns': columns}
+                else:
+                    # First reading - just log that baseline was set
+                    logging.info(f"[ROUTER] Set baseline reading: topic={topic} device={device_id} table={resolved_table} pattern={pattern_name}")
+                    return {'table': resolved_table, 'pattern': pattern_name, 'columns': columns, 'baseline': True}
+            else:
+                # Fallback to original behavior if no device ID found
+                self.db.insert(self.db.meta.tables[resolved_table], row)
+                logging.info(f"[ROUTER] Inserted raw row (no device ID): topic={topic} table={resolved_table} pattern={pattern_name} columns={len(columns)}")
+                return {'table': resolved_table, 'pattern': pattern_name, 'columns': columns}
 
         # AUTO mode (no pattern or forced auto)
         else:
@@ -182,20 +297,37 @@ class Router:
             self._ensure(table_name, auto_columns)
             self.db.ensure_columns(table_name, auto_columns)
             row = PatternMatcher.to_row_auto(topic, payload)
-            self.db.insert(self.db.meta.tables[table_name], row)
             
-            # Register device in mapper if available
+            # Extract device ID for difference calculation
             device_id = self._extract_device_id(payload, row)
-            if self.device_mapper and device_id:
-                self.device_mapper.register_device(
-                    topic=topic,
-                    device_id=device_id,
-                    table_name=table_name,
-                    pattern_name='auto'
-                )
-            
-            # Log successful ingestion
-            log_device_id = device_id or 'unknown'
-            logging.info(f"[ROUTER] Inserted row: topic={topic} device={log_device_id} table={table_name} pattern=auto columns={len(auto_columns)}")
-            
-            return {'table': table_name, 'pattern': 'auto', 'columns': auto_columns}
+            if device_id:
+                # Calculate differences instead of inserting raw values
+                diff_row = self._calculate_differences(topic, device_id, row)
+                if diff_row is not None:
+                    # Create difference table name with "_diff" suffix
+                    diff_table = f"{table_name}_diff"
+                    self._ensure(diff_table, auto_columns)
+                    self.db.ensure_columns(diff_table, auto_columns)
+                    self.db.insert(self.db.meta.tables[diff_table], diff_row)
+                    
+                    # Register device in mapper if available
+                    if self.device_mapper:
+                        self.device_mapper.register_device(
+                            topic=topic,
+                            device_id=device_id,
+                            table_name=diff_table,
+                            pattern_name='auto'
+                        )
+                    
+                    # Log successful difference insertion
+                    logging.info(f"[ROUTER] Inserted difference row: topic={topic} device={device_id} table={diff_table} pattern=auto columns={len(auto_columns)}")
+                    return {'table': diff_table, 'pattern': 'auto', 'columns': auto_columns}
+                else:
+                    # First reading - just log that baseline was set
+                    logging.info(f"[ROUTER] Set baseline reading: topic={topic} device={device_id} table={table_name} pattern=auto")
+                    return {'table': table_name, 'pattern': 'auto', 'columns': auto_columns, 'baseline': True}
+            else:
+                # Fallback to original behavior if no device ID found
+                self.db.insert(self.db.meta.tables[table_name], row)
+                logging.info(f"[ROUTER] Inserted raw row (no device ID): topic={topic} table={table_name} pattern=auto columns={len(auto_columns)}")
+                return {'table': table_name, 'pattern': 'auto', 'columns': auto_columns}
