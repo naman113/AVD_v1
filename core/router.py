@@ -370,9 +370,9 @@ class Router:
                     logging.info(f"[ROUTER] Set baseline reading: topic={topic} device={device_id} table={resolved_table} pattern={pattern_name}")
                     return {'table': resolved_table, 'pattern': pattern_name, 'columns': columns, 'baseline': True}
             else:
-                # Fallback to original behavior if no device ID found
-                self.db.insert(self.db.meta.tables[resolved_table], row)
-                logging.info(f"[ROUTER] Inserted raw row (no device ID): topic={topic} table={resolved_table} pattern={pattern_name} columns={len(columns)}")
+                # Fallback to original behavior if no device ID found - DISABLED to prevent redundant base table creation
+                # self.db.insert(self.db.meta.tables[resolved_table], row)
+                logging.info(f"[ROUTER] Skipped raw row insertion (no device ID): topic={topic} table={resolved_table} pattern={pattern_name} columns={len(columns)}")
                 return {'table': resolved_table, 'pattern': pattern_name, 'columns': columns}
 
         # AUTO mode (no pattern or forced auto)
@@ -465,7 +465,7 @@ class Router:
                     logging.info(f"[ROUTER] Set baseline reading: topic={topic} device={device_id} table={table_name} pattern=auto")
                     return {'table': table_name, 'pattern': 'auto', 'columns': auto_columns, 'baseline': True}
             else:
-                # Fallback to original behavior if no device ID found
-                self.db.insert(self.db.meta.tables[table_name], row)
-                logging.info(f"[ROUTER] Inserted raw row (no device ID): topic={topic} table={table_name} pattern=auto columns={len(auto_columns)}")
+                # Fallback to original behavior if no device ID found - DISABLED to prevent redundant base table creation
+                # self.db.insert(self.db.meta.tables[table_name], row)
+                logging.info(f"[ROUTER] Skipped raw row insertion (no device ID): topic={topic} table={table_name} pattern=auto columns={len(auto_columns)}")
                 return {'table': table_name, 'pattern': 'auto', 'columns': auto_columns}

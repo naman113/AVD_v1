@@ -99,29 +99,29 @@ patterns:
     columns: auto
 
 routes:
-#  - topic: Pengvin1
-#    mqtt_server: server1
-#    auto_discover: true
-#    device_ids:
-#      - pattern: '*'
-#        # Let pattern matching decide automatically
-#    # NEW: Optional interval difference configuration for this topic
-#    interval_difference:
-#      enabled: true
-#      frequency_minutes: 5
-#      table_suffix: "_interval_diff"  # Creates pengvin1_5_interval_diff table for 5-param messages
+- topic: Pengvin1
+  mqtt_server: server1
+  auto_discover: true
+  device_ids:
+    - pattern: '*'
+      # Let pattern matching decide automatically
+  # NEW: Optional interval difference configuration for this topic
+  interval_difference:
+    enabled: true
+    frequency_minutes: 5
+    table_suffix: "_interval_diff"  # Creates pengvin1_5_interval_diff table for 5-param messages
 
-  - topic: Gree1
-    mqtt_server: server2
-    auto_discover: true
-    device_ids:
-      - pattern: '*'
-        # Let pattern matching decide automatically
-    # NEW: Optional interval difference configuration for this topic
-    interval_difference:
-      enabled: false
-      frequency_minutes: 5
-      table_suffix: "_interval_diff"  # Creates pengvin1_5_interval_diff table for 5-param messages
+  # - topic: Gree1
+  #   mqtt_server: server2
+  #   auto_discover: true
+  #   device_ids:
+  #     - pattern: '*'
+  #       # Let pattern matching decide automatically
+  #   # NEW: Optional interval difference configuration for this topic
+  #   interval_difference:
+  #     enabled: false
+  #     frequency_minutes: 5
+  #     table_suffix: "_interval_diff"  # Creates pengvin1_5_interval_diff table for 5-param messages
 
   #- topic: Energy1
    # mqtt_server: server3
