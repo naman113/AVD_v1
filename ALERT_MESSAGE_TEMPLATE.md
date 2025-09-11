@@ -166,36 +166,6 @@ client.connect("your_broker", 8883, 60)
 client.loop_forever()
 ```
 
-### Node.js Example (using mqtt.js)
-
-```javascript
-const mqtt = require('mqtt');
-
-const client = mqtt.connect('mqtts://your_broker:8883', {
-  username: 'your_username',
-  password: 'your_password'
-});
-
-client.on('connect', () => {
-  console.log('Connected to MQTT broker');
-  client.subscribe('alerts/monitoring');
-});
-
-client.on('message', (topic, message) => {
-  try {
-    const alert = JSON.parse(message.toString());
-    
-    console.log(`ALERT: ${alert.topic}/${alert.device_id} - ${alert.violations.length} violations`);
-    
-    alert.violations.forEach(violation => {
-      console.log(`  ${violation.parameter}: ${violation.value} (${violation.type} threshold ${violation.threshold})`);
-    });
-    
-  } catch (error) {
-    console.error('Failed to parse alert message:', error);
-  }
-});
-```
 
 ## Configuration Reference
 

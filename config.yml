@@ -29,8 +29,8 @@ mqtt_servers:
   alert_publisher:
     broker: s3550ec0.ala.us-east-1.emqxsl.com
     port: 8883
-    username: Pengvin1  # Use Pengvin1 credentials for publishing alerts
-    password: Pengvin1
+    username: Alert  # Use Pengvin1 credentials for publishing alerts
+    password: Alert
     ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
     client_id_prefix: AlertPublisher
     keepalive: 60
