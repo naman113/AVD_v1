@@ -1,140 +1,74 @@
-mqtt_defaults:
-  broker: s3550ec0.ala.us-east-1.emqxsl.com
-  port: 8883
-  username: Gree1
-  password: Gree1
-  ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
-  client_id_prefix: UnifiedIngestor
-  keepalive: 60
-database:
-  uri: postgresql://admin:password@db.telemetrywatch.com:5432/unified_ingestion
-patterns:
-- name: flat_series
-  match:
-    keys:
-    - DeviceID
-    - Date
-    - Time
-    - P0
-  table: '{topic}_flat'
-  columns: auto
-- name: array_enveloped
-  match:
-    schema:
-      root: object
-      fields:
-        d: object
-        ts: string
-  table: '{topic}_array_enveloped'
-  columns: auto
+mqtt_servers:
+  server1:
+    broker: s3550ec0.ala.us-east-1.emqxsl.com
+    port: 8883
+    username: Pengvin1
+    password: Pengvin1
+    ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
+    client_id_prefix: AlertMonitor
+    keepalive: 60
+
+  server2:
+    broker: s3550ec0.ala.us-east-1.emqxsl.com
+    port: 8883
+    username: Gree1
+    password: Gree1
+    ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
+    client_id_prefix: AlertMonitor
+    keepalive: 60
+
+  server3:
+    broker: s3550ec0.ala.us-east-1.emqxsl.com
+    port: 8883
+    username: Energy1
+    password: Energy1
+    ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
+    client_id_prefix: AlertMonitor
+    keepalive: 60
+
+  alert_publisher:
+    broker: s3550ec0.ala.us-east-1.emqxsl.com
+    port: 8883
+    username: Pengvin1  # Use Pengvin1 credentials for publishing alerts
+    password: Pengvin1
+    ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
+    client_id_prefix: AlertPublisher
+    keepalive: 60
+
 routes:
+- topic: Pengvin1
+  mqtt_server: server1
 - topic: Gree1
-  username: Gree1
-  password: Gree1
-  auto_discover: true
-  device_ids:
-  - pattern: '*'
-    pattern_name: auto
-    table_override: null
-  - pattern: '3'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '1'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '4'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '2'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '5'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '6'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '7'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '8'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '9'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '10'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '11'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '12'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '13'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '14'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '15'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '16'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '95'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '17'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '96'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '18'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '97'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '19'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '98'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '20'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '99'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '100'
-    pattern_name: auto
-    table_override: gree1_9
-  - pattern: '101'
-    pattern_name: auto
-    table_override: gree1_9
+  mqtt_server: server2
 - topic: Energy1
-  auto_discover: true
-  device_ids:
-  - pattern: '*'
-    pattern_name: auto
-    table_override: null
-- topic: Weighing
-  auto_discover: true
-  device_ids:
-  - pattern: '*'
-    pattern_name: auto
-    table_override: null
-  - pattern: '1'
-    pattern_name: auto
-    table_override: weighing_7
-  - pattern: '2'
-    pattern_name: auto
-    table_override: weighing_7
-  - pattern: '3'
-    pattern_name: auto
-    table_override: weighing_7
+  mqtt_server: server3
+
+# Alert monitoring configuration
+alerts:
+  enabled: true
+  alert_topic: "alerts/monitoring"
+  mqtt_server: alert_publisher  # Dedicated server for publishing alerts
+  
+  # Thresholds per topic and device
+  thresholds:
+    Pengvin1:
+      default:  # Default thresholds for all devices in this topic
+        P0: {low: 0, high: 0}
+        P1: {low: 0, high: 0}
+        P2: {low: 0, high: 0}
+        P3: {low: 0, high: 0}
+    
+    Gree1:
+      default:
+        P0: {low: 0, high: 0}
+        P1: {low: 0, high: 0}
+        P2: {low: 0, high: 0}
+        P3: {low: 0, high: 0}
+        P4: {low: 0, high: 0}
+        P5: {low: 0, high: 0}
+    
+    Energy1:
+      default:
+        P0: {low: 0, high: 0}
+        P2: {low: 0, high: 0}
+        P3: {low: 0, high: 0}
