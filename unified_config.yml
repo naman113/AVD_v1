@@ -5,12 +5,42 @@ mqtt_servers:
     username: Pengvin1
     password: Pengvin1
     ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
-    client_id_prefix: UnifiedIngestor
+    client_id_prefix: Diffcalculator
     keepalive: 60
+    workers: 16  # Increased from default 4 to handle high device volume
 
+  server2:
+    broker: s3550ec0.ala.us-east-1.emqxsl.com
+    port: 8883
+    username: Gree1
+    password: Gree1
+    ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
+    client_id_prefix: Differencecalculator
+    keepalive: 60
+    workers: 20  # Increased from default 4 - Gree has most devices (~103)
+
+  server3:
+    broker: s3550ec0.ala.us-east-1.emqxsl.com
+    port: 8883
+    username: Energy1
+    password: Energy1
+    ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
+    client_id_prefix: Differencecalculator
+    keepalive: 60
+    workers: 12  # Increased from default 4 for Energy devices
 
 database:
   uri: postgresql://admin:password@db.telemetrywatch.com:5432/unified_ingestion
+  # Connection pool settings for high-volume processing
+  pool_size: 20
+  max_overflow: 30
+  pool_pre_ping: true
+  pool_recycle: 3600
+
+# NEW: Global interval difference configuration
+interval_difference:
+  enabled: true
+  default_frequency_minutes: 5
 
 patterns:
   - name: flat_series_4_params
@@ -69,17 +99,38 @@ patterns:
     columns: auto
 
 routes:
-  - topic: Pengvin1
-    mqtt_server: server1
+#  - topic: Pengvin1
+#    mqtt_server: server1
+#    auto_discover: true
+#    device_ids:
+#      - pattern: '*'
+#        # Let pattern matching decide automatically
+#    # NEW: Optional interval difference configuration for this topic
+#    interval_difference:
+#      enabled: true
+#      frequency_minutes: 5
+#      table_suffix: "_interval_diff"  # Creates pengvin1_5_interval_diff table for 5-param messages
+
+  - topic: Gree1
+    mqtt_server: server2
     auto_discover: true
     device_ids:
       - pattern: '*'
         # Let pattern matching decide automatically
-  
-  # Commented out Energy1 route for now
-  # - topic: Energy1
-  #   mqtt_server: server1
-  #   auto_discover: true
-  #   device_ids:
-  #     - pattern: '*'
-  #       pattern_name: flat_series_5_params
+    # NEW: Optional interval difference configuration for this topic
+    interval_difference:
+      enabled: false
+      frequency_minutes: 5
+      table_suffix: "_interval_diff"  # Creates pengvin1_5_interval_diff table for 5-param messages
+
+  #- topic: Energy1
+   # mqtt_server: server3
+   # auto_discover: true
+   # device_ids:
+      #- pattern: '*'
+        # Let pattern matching decide automatically
+    # NEW: Optional interval difference configuration for this topic
+    #interval_difference:
+     # enabled: true
+      #frequency_minutes: 5
+     # table_suffix: "_interval_diff"  # Creates pengvin1_5_interval_diff table for 5-param messages

@@ -7,9 +7,10 @@ from .patterns import PatternMatcher
 from .device_mapper import DeviceMapper
 from .table_manager import TableManager
 from .data_transformer import DataTransformer
+from .interval_difference_calculator import IntervalDifferenceCalculator
 
 class Router:
-    def __init__(self, db: DB, patterns: list[Dict[str, Any]], device_mapper: Optional[DeviceMapper] = None):
+    def __init__(self, db: DB, patterns: list[Dict[str, Any]], device_mapper: Optional[DeviceMapper] = None, routes: list[Dict[str, Any]] = None):
         self.db = db
         self.matcher = PatternMatcher(patterns)
         self.device_mapper = device_mapper
@@ -21,6 +22,11 @@ class Router:
         self._pattern_by_name = {p.get('name'): p for p in patterns if p.get('name')}
         # in-memory cache for last readings per device/topic for difference calculation
         self._last_readings = {}  # key: f"{topic}:{device_id}" -> Dict[str, Any]
+        # NEW: Interval difference calculator
+        self.interval_calculator = IntervalDifferenceCalculator()
+        # Store routes for interval configuration lookup
+        self._routes = routes or []
+        self._route_by_topic = {r.get('topic'): r for r in self._routes if r.get('topic')}
 
     def _extract_device_id(self, payload: Any, row_data: Dict[str, Any] = None) -> Optional[str]:
         """Extract device ID from payload or row data, handling different message structures."""
@@ -154,6 +160,60 @@ class Router:
                 pass
         return None
 
+    def _process_interval_differences(self, topic: str, device_id: str, current_row: Dict[str, Any], 
+                                    rule: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Process interval-based differences if configured for this route."""
+        
+        # Check if interval differences are enabled for this route
+        interval_config = self._get_interval_config(rule, topic)
+        if not interval_config.get('enabled', False):
+            return None
+        
+        frequency_minutes = interval_config.get('frequency_minutes', 5)
+        
+        # Use the interval calculator to process the reading
+        return self.interval_calculator.process_reading(
+            topic=topic,
+            device_id=device_id,
+            current_row=current_row,
+            frequency_minutes=frequency_minutes
+        )
+    
+    def _get_interval_config(self, rule: Optional[Dict[str, Any]], topic: str = None) -> Dict[str, Any]:
+        """Get interval difference configuration for the current route."""
+        
+        # Default configuration
+        default_config = {
+            'enabled': False,
+            'frequency_minutes': 5,
+            'table_suffix': '_interval_diff'
+        }
+        
+        # Check route-level configuration first
+        if topic and topic in self._route_by_topic:
+            route = self._route_by_topic[topic]
+            if 'interval_difference' in route:
+                route_config = route['interval_difference']
+                # Merge route config with defaults
+                config = default_config.copy()
+                config.update(route_config)
+                
+                # Override with device rule config if present
+                if rule and 'interval_difference' in rule:
+                    config.update(rule['interval_difference'])
+                
+                return config
+        
+        # Check if rule has interval_difference configuration
+        if rule and 'interval_difference' in rule:
+            rule_config = rule['interval_difference']
+            # Merge rule config with defaults
+            config = default_config.copy()
+            config.update(rule_config)
+            return config
+        
+        return default_config
+
     def _format_table(self, table_tpl: Optional[str], topic: str) -> Optional[str]:
         if not table_tpl:
             return None
@@ -245,7 +305,7 @@ class Router:
             # Extract device ID for difference calculation
             device_id = self._extract_device_id(transformed_payload, row)
             if device_id:
-                # Calculate differences instead of inserting raw values
+                # EXISTING: Calculate consecutive differences
                 diff_row = self._calculate_differences(topic, device_id, row)
                 if diff_row is not None:
                     # Create difference table name with "_diff" suffix
@@ -265,7 +325,46 @@ class Router:
                     
                     # Log successful difference insertion
                     logging.info(f"[ROUTER] Inserted difference row: topic={topic} device={device_id} table={diff_table} pattern={pattern_name} columns={len(columns)}")
-                    return {'table': diff_table, 'pattern': pattern_name, 'columns': columns}
+                
+                # NEW: Process interval differences if configured
+                interval_diff_row = self._process_interval_differences(topic, device_id, row, rule)
+                if interval_diff_row is not None:
+                    # Get interval configuration for table naming
+                    interval_config = self._get_interval_config(rule, topic)
+                    table_suffix = interval_config.get('table_suffix', '_interval_diff')
+                    interval_table = f"{resolved_table}{table_suffix}"
+                    
+                    # Add interval_boundary and new P0 tracking columns if not present
+                    interval_columns = columns.copy()
+                    if 'interval_boundary' not in interval_columns:
+                        interval_columns['interval_boundary'] = 'string'
+                    if 'start_P0_value' not in interval_columns:
+                        interval_columns['start_P0_value'] = 'float'
+                    if 'start_P0_time' not in interval_columns:
+                        interval_columns['start_P0_time'] = 'string'
+                    if 'end_P0_value' not in interval_columns:
+                        interval_columns['end_P0_value'] = 'float'
+                    if 'end_P0_time' not in interval_columns:
+                        interval_columns['end_P0_time'] = 'string'
+                    
+                    self._ensure(interval_table, interval_columns)
+                    self.db.ensure_columns(interval_table, interval_columns)
+                    self.db.insert(self.db.meta.tables[interval_table], interval_diff_row)
+                    
+                    # Register device in mapper if available
+                    if self.device_mapper:
+                        self.device_mapper.register_device(
+                            topic=topic,
+                            device_id=device_id,
+                            table_name=interval_table,
+                            pattern_name=f"{pattern_name or 'matched'}_interval"
+                        )
+                    
+                    # Log successful interval difference insertion
+                    logging.info(f"[ROUTER] Inserted interval difference row: topic={topic} device={device_id} table={interval_table} pattern={pattern_name}")
+                
+                if diff_row is not None or interval_diff_row is not None:
+                    return {'table': resolved_table, 'pattern': pattern_name, 'columns': columns}
                 else:
                     # First reading - just log that baseline was set
                     logging.info(f"[ROUTER] Set baseline reading: topic={topic} device={device_id} table={resolved_table} pattern={pattern_name}")
@@ -301,7 +400,7 @@ class Router:
             # Extract device ID for difference calculation
             device_id = self._extract_device_id(payload, row)
             if device_id:
-                # Calculate differences instead of inserting raw values
+                # EXISTING: Calculate consecutive differences
                 diff_row = self._calculate_differences(topic, device_id, row)
                 if diff_row is not None:
                     # Create difference table name with "_diff" suffix
@@ -321,7 +420,46 @@ class Router:
                     
                     # Log successful difference insertion
                     logging.info(f"[ROUTER] Inserted difference row: topic={topic} device={device_id} table={diff_table} pattern=auto columns={len(auto_columns)}")
-                    return {'table': diff_table, 'pattern': 'auto', 'columns': auto_columns}
+                
+                # NEW: Process interval differences if configured
+                interval_diff_row = self._process_interval_differences(topic, device_id, row, rule)
+                if interval_diff_row is not None:
+                    # Get interval configuration for table naming
+                    interval_config = self._get_interval_config(rule, topic)
+                    table_suffix = interval_config.get('table_suffix', '_interval_diff')
+                    interval_table = f"{table_name}{table_suffix}"
+                    
+                    # Add interval_boundary and new P0 tracking columns if not present
+                    interval_columns = auto_columns.copy()
+                    if 'interval_boundary' not in interval_columns:
+                        interval_columns['interval_boundary'] = 'string'
+                    if 'start_P0_value' not in interval_columns:
+                        interval_columns['start_P0_value'] = 'float'
+                    if 'start_P0_time' not in interval_columns:
+                        interval_columns['start_P0_time'] = 'string'
+                    if 'end_P0_value' not in interval_columns:
+                        interval_columns['end_P0_value'] = 'float'
+                    if 'end_P0_time' not in interval_columns:
+                        interval_columns['end_P0_time'] = 'string'
+                    
+                    self._ensure(interval_table, interval_columns)
+                    self.db.ensure_columns(interval_table, interval_columns)
+                    self.db.insert(self.db.meta.tables[interval_table], interval_diff_row)
+                    
+                    # Register device in mapper if available
+                    if self.device_mapper:
+                        self.device_mapper.register_device(
+                            topic=topic,
+                            device_id=device_id,
+                            table_name=interval_table,
+                            pattern_name='auto_interval'
+                        )
+                    
+                    # Log successful interval difference insertion
+                    logging.info(f"[ROUTER] Inserted interval difference row: topic={topic} device={device_id} table={interval_table} pattern=auto")
+                
+                if diff_row is not None or interval_diff_row is not None:
+                    return {'table': table_name, 'pattern': 'auto', 'columns': auto_columns}
                 else:
                     # First reading - just log that baseline was set
                     logging.info(f"[ROUTER] Set baseline reading: topic={topic} device={device_id} table={table_name} pattern=auto")

@@ -93,12 +93,12 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     cfg_loader = ConfigLoader('unified_config.yml', reload_seconds=15)
     cfg = cfg_loader.get()
-    db = DB(cfg['database']['uri'])
+    db = DB(cfg['database'])
     
     # Initialize device mapper
     device_mapper = DeviceMapper(cfg['database']['uri'])
     
-    router = Router(db, cfg.get('patterns', []), device_mapper)
+    router = Router(db, cfg.get('patterns', []), device_mapper, cfg.get('routes', []))
     # No mqtt_defaults - each route must specify mqtt_server
     hub = MQTTHub({})
     counters = defaultdict(lambda: defaultdict(int))
@@ -109,7 +109,7 @@ def main():
         logging.info('[CFG] Reload detected; rebuilding subscriptions')
         # Update router with new device mapper if database URI changed
         new_device_mapper = DeviceMapper(new_cfg['database']['uri'])
-        new_router = Router(db, new_cfg.get('patterns', []), new_device_mapper)
+        new_router = Router(db, new_cfg.get('patterns', []), new_device_mapper, new_cfg.get('routes', []))
         build_subs(hub, new_router, new_cfg, counters)
     cfg_loader.on_change(on_change)
 

@@ -17,11 +17,25 @@ SQL_TYPE_MAP = {
 class DB:
     # cache table->set(columns) across instances (lightweight). It's refreshed on use.
     _columns_cache = {}
-    def __init__(self, uri: str):
+    def __init__(self, db_config: dict):
+        if isinstance(db_config, str):
+            # Backward compatibility - if just URI string is passed
+            uri = db_config
+            pool_config = {}
+        else:
+            uri = db_config['uri']
+            pool_config = {
+                'pool_size': db_config.get('pool_size', 10),
+                'max_overflow': db_config.get('max_overflow', 20),
+                'pool_pre_ping': db_config.get('pool_pre_ping', True),
+                'pool_recycle': db_config.get('pool_recycle', 3600)
+            }
+        
         # If using PostgreSQL without an explicit driver, prefer psycopg (psycopg3)
         if uri.startswith("postgresql://") and "+" not in uri:
             uri = uri.replace("postgresql://", "postgresql+psycopg://", 1)
-        self.engine: Engine = create_engine(uri, pool_pre_ping=True)
+        
+        self.engine: Engine = create_engine(uri, **pool_config)
         self.meta = MetaData()
         self._tables: Dict[str, Table] = {}
         self._lock = RLock()
@@ -37,8 +51,10 @@ class DB:
                 self._tables[name] = table
                 # cache columns
                 try:
-                    self._columns_cache[name] = {col['name'] for col in insp.get_columns(name)}
-                except Exception:
+                    columns_info = insp.get_columns(name)
+                    self._columns_cache[name] = {col['name'] for col in columns_info}
+                except Exception as e:
+                    logging.warning(f"[DB] Failed to cache columns for table '{name}': {e}")
                     self._columns_cache.pop(name, None)
                 logging.info(f"[DB] Using existing table '{name}'")
                 return table
@@ -50,7 +66,7 @@ class DB:
                 else:
                     col = Column(cname, ctype)
                 cols.append(col)
-            cols.append(Column('ingested_at', DateTime, default=func.now()))
+            cols.append(Column('ingested_at', DateTime(timezone=True), default=func.now()))
             table = Table(name, self.meta, *cols)
             self.meta.create_all(self.engine)
             self._tables[name] = table
