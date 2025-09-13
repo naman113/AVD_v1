@@ -5,7 +5,7 @@ mqtt_servers:
     username: Pengvin1
     password: Pengvin1
     ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
-    client_id_prefix: AlertMonitor
+    client_id_prefix: AlertMonitor_Pengvin
     keepalive: 60
 
   server2:
@@ -14,7 +14,7 @@ mqtt_servers:
     username: Gree1
     password: Gree1
     ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
-    client_id_prefix: AlertMonitor
+    client_id_prefix: AlertMonitor_Gree1
     keepalive: 60
 
   server3:
@@ -23,7 +23,7 @@ mqtt_servers:
     username: Energy1
     password: Energy1
     ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
-    client_id_prefix: AlertMonitor
+    client_id_prefix: AlertMonitor_Energy1
     keepalive: 60
 
   alert_publisher:
