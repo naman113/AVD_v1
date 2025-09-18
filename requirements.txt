@@ -1,5 +1,6 @@
 paho-mqtt==1.6.1
 SQLAlchemy==2.0.31
 psycopg[binary]==3.2.8
+psycopg2-binary==2.9.9
 PyYAML==6.0.2
 python-dateutil==2.9.0.post0

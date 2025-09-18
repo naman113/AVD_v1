@@ -8,23 +8,6 @@ mqtt_servers:
     client_id_prefix: AlertMonitor_Pengvin
     keepalive: 60
 
-  server2:
-    broker: s3550ec0.ala.us-east-1.emqxsl.com
-    port: 8883
-    username: Gree1
-    password: Gree1
-    ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
-    client_id_prefix: AlertMonitor_Gree1
-    keepalive: 60
-
-  server3:
-    broker: s3550ec0.ala.us-east-1.emqxsl.com
-    port: 8883
-    username: Energy1
-    password: Energy1
-    ca_cert: /Users/nemasis/Downloads/emqxsl-ca (1).crt
-    client_id_prefix: AlertMonitor_Energy1
-    keepalive: 60
 
   alert_publisher:
     broker: s3550ec0.ala.us-east-1.emqxsl.com
@@ -38,37 +21,24 @@ mqtt_servers:
 routes:
 - topic: Pengvin1
   mqtt_server: server1
-- topic: Gree1
-  mqtt_server: server2
-- topic: Energy1
-  mqtt_server: server3
+
+
+# Database configuration for threshold management
+database:
+  uri: postgresql://admin:password@db.telemetrywatch.com:5432/unified_ingestion
+  # Connection pool settings
+  pool_size: 5
+  max_overflow: 10
+
+# Company and device mapping for database integration
+company_config:
+  # Map MQTT topics to company IDs
+  topic_company_mapping:
+    Pengvin1: 1
+
 
 # Alert monitoring configuration
 alerts:
   enabled: true
   alert_topic: "alerts/monitoring"
   mqtt_server: alert_publisher  # Dedicated server for publishing alerts
-  
-  # Thresholds per topic and device
-  thresholds:
-    Pengvin1:
-      default:  # Default thresholds for all devices in this topic
-        P0: {low: 0, high: 0}
-        P1: {low: 0, high: 0}
-        P2: {low: 0, high: 0}
-        P3: {low: 0, high: 0}
-    
-    Gree1:
-      default:
-        P0: {low: 0, high: 0}
-        P1: {low: 0, high: 0}
-        P2: {low: 0, high: 0}
-        P3: {low: 0, high: 0}
-        P4: {low: 0, high: 0}
-        P5: {low: 0, high: 0}
-    
-    Energy1:
-      default:
-        P0: {low: 0, high: 0}
-        P2: {low: 0, high: 0}
-        P3: {low: 0, high: 0}
